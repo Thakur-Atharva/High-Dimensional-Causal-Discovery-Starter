@@ -81,7 +81,9 @@ def fges(prep, penalty: float = 1.0, max_degree: int = -1, threads: int | None =
     alg.setFaithfulnessAssumed(faithfulness)
     if max_degree > 0:
         alg.setMaxDegree(int(max_degree))
-    alg.setNumThreads(int(threads or os.cpu_count() or 1))
+    if not threads:                                   # cores this process may use (respects Slurm/cgroups)
+        threads = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)
+    alg.setNumThreads(int(threads))
     alg.setVerbose(bool(verbose))
     t0 = time.perf_counter()
     cpdag = alg.search()
