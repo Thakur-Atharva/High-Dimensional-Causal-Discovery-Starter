@@ -9,7 +9,7 @@ import numpy as np
 
 from .dagma_torch import DagmaLinear
 from .hill_climb import candidate_pairs, hill_climb, partial_correlations
-from .scores import CategoricalBIC, GaussianBIC
+from .scores import CategoricalBIC, GaussianBIC, resolve_penalty
 
 log = logging.getLogger(__name__)
 
@@ -50,8 +50,8 @@ def bic_score(prep, penalty: float = 1.0):
 
 
 def dagma_hc(prep, model: DagmaLinear | None = None, k: int = 20, penalty: float = 1.0,
-             max_parents: int | None = None, restarts: int = 5, candidates: str = "dagma+pcorr", tabu: int = 0,
-             seed: int = 0, verbose: bool = True, **dagma_kwargs):
+             min_partial_corr: float | None = None, max_parents: int | None = None, restarts: int = 5,
+             candidates: str = "dagma+pcorr", tabu: int = 0, seed: int = 0, verbose: bool = True, **dagma_kwargs):
     """DAGMA proposes the k strongest neighbours of each variable; BIC hill climbing picks edges and directions.
 
     candidates="dagma+pcorr" (default) adds each variable's k largest partial correlations to DAGMA's proposals:
@@ -73,6 +73,9 @@ def dagma_hc(prep, model: DagmaLinear | None = None, k: int = 20, penalty: float
     d = prep.X.shape[1]
     log.info("DAGMA + hill climbing: %d candidate pairs (%s, k = %d per variable), %d restart(s)", len(pairs),
              candidates, k, restarts)
+    penalty = resolve_penalty(penalty, min_partial_corr, prep.X.shape[0])
+    if min_partial_corr is not None:
+        log.info("min partial correlation %.3g -> BIC penalty %.2f", min_partial_corr, penalty)
     score = bic_score(prep, penalty)
     rng = np.random.default_rng(seed)
     t0 = time.perf_counter()
@@ -88,7 +91,8 @@ def dagma_hc(prep, model: DagmaLinear | None = None, k: int = 20, penalty: float
     A, bic, hc = best
     hc_seconds = time.perf_counter() - t0
     return A, {"seconds": model.seconds + hc_seconds, "dagma_seconds": model.seconds, "hc_seconds": hc_seconds,
-               "candidate_pairs": len(pairs), "candidates": candidates, "restarts": restarts, "steps": hc.steps, "moves": hc.moves, "bic": bic}
+               "candidate_pairs": len(pairs), "candidates": candidates, "restarts": restarts, "penalty": penalty,
+               "steps": hc.steps, "moves": hc.moves, "bic": bic}
 
 
 def fges(prep, **kwargs):

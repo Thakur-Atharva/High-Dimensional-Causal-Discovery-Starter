@@ -88,3 +88,13 @@ class CategoricalBIC:
                 hit = ll - self.pen * k
             self._cache[key] = hit
         return hit
+
+
+def penalty_for_min_partial_corr(r: float, n: int) -> float:
+    """BIC penalty multiplier at which adding one parent to a continuous variable pays off only if its partial
+    correlation exceeds about r: the edge is accepted iff  -n log(1 - r^2) > penalty * log(n)."""
+    return -n * math.log(1 - r * r) / math.log(n)
+
+
+def resolve_penalty(penalty: float, min_partial_corr: float | None, n: int) -> float:
+    return penalty if min_partial_corr is None else penalty_for_min_partial_corr(min_partial_corr, n)

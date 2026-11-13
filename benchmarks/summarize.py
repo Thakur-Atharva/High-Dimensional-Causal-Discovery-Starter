@@ -74,6 +74,8 @@ def figure(df: pd.DataFrame, path: Path) -> None:
             color, marker, ls, filled = STYLE[m]
             ax.plot(g.seconds, g[col], ls=ls, color=color, lw=2, marker=marker, ms=8,
                     mfc=color if filled else "white", mec=color, label=m)
+            if "tabu" in m:                              # sits on top of plain hill climbing; label that one only
+                continue
             for _, r in g.iterrows():
                 ax.annotate(f"{int(r.variables):,}", (r.seconds, r[col]), textcoords="offset points", xytext=(6, 4),
                             fontsize=8, color="#444444")
@@ -82,9 +84,11 @@ def figure(df: pd.DataFrame, path: Path) -> None:
         ax.set_title(title, fontsize=11)
         ax.grid(alpha=0.3)
     axes[0].set_ylabel("Accuracy against the true graph")
-    axes[0].legend(frameon=False, fontsize=9, loc="lower left")
-    fig.suptitle("Speed vs accuracy on simulated continuous data (labels: number of variables)", fontsize=12)
-    fig.savefig(path, dpi=130)
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower center", ncol=len(labels), frameon=False, fontsize=10,
+               bbox_to_anchor=(0.5, -0.08))
+    fig.suptitle("Speed vs accuracy on simulated continuous data (point labels: number of variables)", fontsize=12)
+    fig.savefig(path, dpi=130, bbox_inches="tight")
 
 
 def main() -> None:

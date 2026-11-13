@@ -28,7 +28,7 @@ suggests a chain or fork through B. If A and C are independent but both depend o
 1. **No hidden common causes.** If something unmeasured drives two columns, the methods may draw an edge between
    them that isn't causal.
 2. **No feedback loops,** because the output is acyclic.
-3. **Rows are independent draws from one process.** Time series break this (see section 5).
+3. **Rows are independent draws from one process.** Time series break this (see section 6).
 4. **Relationships are roughly linear** for continuous data: all three methods here use linear models. Strong
    nonlinearity can hide edges or create spurious ones.
 
@@ -86,9 +86,51 @@ python -m causal_discovery benchmark --data data/sim.csv --truth data/sim_truth.
 ```
 
 The table is printed and saved in `results/sim/results.md`. Each method's graph is saved as
-`results/sim/graph_<method>.csv`, one `source,target` row per edge. Section 4 explains the columns.
+`results/sim/graph_<method>.csv`, one `source,target` row per edge. Sections 4 and 5 explain the columns.
 
-## 4. Your data
+## 4. Results on simulated data
+
+We ran the benchmark on simulated data, where the true graph is known, to show how accurate and how fast each method
+is. The script `benchmarks/run_simulated.sh` reproduces everything below; `benchmarks/summarize.py` rebuilds the
+tables and the figure.
+
+**What was simulated** (`causal_discovery/simulate.py`):
+- **Continuous data:**
+  - A random DAG with about 2 edges per variable.
+  - Every variable is a linear combination of its parents, with weights between ±0.5 and ±2, plus Gaussian noise.
+  - All columns are standardized before learning, so no method can exploit differences in scale.
+- **Categorical data:** the same kind of graph, with 2–4 categories per variable and random probability tables.
+
+**How it was run:**
+- A random 20% of rows was held out; every method learned on the other 80%.
+- Hardware: one NVIDIA RTX 4090 for DAGMA, and 16 CPU cores for hill climbing and fGES.
+- Settings: defaults throughout (`--penalty 1`, 5 restarts, `k = 20`). The "(tabu 10)" row is the same as the row
+  above it except for `--tabu 10`.
+
+### What the accuracy metrics mean
+
+The first three compare the learned graph with the true one, so they exist only for simulated data. The last one
+needs no true graph, so it is the one you can use on real data.
+
+| Metric | What it measures | Best value |
+|---|---|---|
+| **Time (s)** | Wall-clock time to learn the graph from the training rows. For DAGMA + hill climbing it includes the DAGMA fit | lower |
+| **Edges** | Number of arrows found. Compare it with the true number in each table's heading | close to the truth |
+| **Skeleton F1** | Ignores arrow directions and asks whether the right pairs are connected. *Precision* is the share of found connections that are real; *recall* is the share of real connections found; F1 = 2·precision·recall / (precision + recall) balances the two | 1 |
+| **Directed F1** | The same, but an arrow counts only if it also points the right way. Even a perfect method cannot always reach 1, because some directions cannot be determined from observational data (section 1) | 1 |
+| **SHD** (structural Hamming distance) | The number of single-edge corrections that turn the learned graph into the true one: add a missing edge, delete an extra one, or flip a reversed one | 0 |
+| **Held-out gain / row** | How much better the learned graph predicts the 20% test rows than the empty graph does (every variable independent). It is the log-likelihood per test row, summed over all variables, minus the empty graph's. Higher is better. It rewards finding real dependences, barely penalizes extra edges, and ignores directions | higher |
+
+### Speed vs accuracy
+
+![Runtime vs accuracy for each method and data size](benchmarks/speed_vs_accuracy.png)
+
+Each line is one method. Its points are the 100-, 500- and 2,500-variable datasets (labelled), placed by runtime
+(horizontal, log scale) and accuracy (vertical).
+
+<!-- SUMMARY TABLES -->
+
+## 5. Your data
 
 **Format.**
 - One row per sample and one column per variable, in `.csv`, `.parquet` (recommended at this size) or `.feather`.
@@ -132,7 +174,7 @@ This writes `edges.csv`, `adjacency.npy` (`A[i, j] = 1` means column i -> column
 - Agreement between methods (`skeleton_jaccard`) is a useful stability check. Edges found by all three are the most
   trustworthy.
 
-## 5. Settings that matter
+## 6. Settings that matter
 
 | Option | Default | When to change it |
 |---|---|---|
@@ -143,7 +185,8 @@ This writes `edges.csv`, `adjacency.npy` (`A[i, j] = 1` means column i -> column
 | `--candidates` | `dagma+pcorr` | `dagma_hc`: `dagma` uses only DAGMA's proposals; the default adds each variable's largest partial correlations |
 | `--restarts` | 5 | `dagma_hc`: number of hill-climbing runs with different tie-breaking; the best-scoring graph is kept |
 | `--lambda1`, `--w-threshold` | 0.03, 0.3 | DAGMA's own sparsity weight and edge cut-off (the library defaults) |
-| `--threads`, `--max-degree`, `--java-heap` | all cores, none, 16g | `fges` runtime and memory. `--max-degree 20` bounds runtime on dense data |
+| `--threads`, `--max-degree`, `--java-heap` | all cores, none, 16g | `fges` runtime and memory. At 2,500 variables fGES needs more Java memory: use `--java-heap 64g` (16g ran out on the simulated benchmark). `--max-degree 20`, or a higher `--penalty`, bounds runtime on dense data |
+| `--fges-bound` | 0 (off) | `fges`: only allow edges among each variable's top-K partial correlations, e.g. `20`. With many rows, fGES otherwise starts from almost every pair of variables, because nearly everything is weakly correlated with everything else. That made it run for hours (and run out of Java memory) on our 2,500-variable simulation. Bounding makes it practical at that size, at some cost in accuracy (section 4) |
 | `--device` | `cuda` if available | `dagma`: `cpu` works but is slow above ~500 columns |
 | `--data-type` | `auto` | `continuous` or `categorical`. `auto` calls a table categorical if every column has at most 20 distinct integer values |
 
@@ -160,7 +203,7 @@ categorical columns, dropping one level each.
 - The methods still treat rows as independent, so they look only for effects within a single time step.
 - For lagged effects, look at time-series methods such as PCMCI (tigramite) or DYNOTEARS.
 
-## 6. How the methods work
+## 7. How the methods work
 
 **DAGMA (`dagma`).**
 - **The model:** each variable is a weighted sum of the others plus noise. The weight matrix `W` encodes the graph:
@@ -206,7 +249,7 @@ categorical columns, dropping one level each.
   from the class for scoring; all DAGs in a class score the same.
 - **Code:** `causal_discovery/fges.py`, which calls Tetrad through py-tetrad.
 
-## 7. Using it from Python
+## 8. Using it from Python
 
 ```python
 from causal_discovery.data import load_table, Preprocessor
@@ -218,7 +261,7 @@ A, info = methods.fges(prep, penalty=2.0)       # or methods.dagma(prep), method
 edges = [(prep.names[i], prep.names[j]) for i, j in zip(*A.nonzero())]
 ```
 
-## 8. Repository layout
+## 9. Repository layout
 
 ```
 causal_discovery/
@@ -235,7 +278,7 @@ causal_discovery/
 tests/             quick checks (pytest)
 ```
 
-## 9. References
+## 10. References
 
 - Bello, Aragam, Ravikumar. *DAGMA: Learning DAGs via M-matrices and a log-determinant acyclicity
   characterization.* NeurIPS 2022. https://arxiv.org/abs/2209.08037

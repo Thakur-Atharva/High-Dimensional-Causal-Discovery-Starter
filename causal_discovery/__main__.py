@@ -34,20 +34,19 @@ def _common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--threads", type=int, default=None, help="fges: CPU threads (default: all cores)")
     p.add_argument("--max-degree", type=int, default=-1, help="fges: cap on neighbours per variable (-1: none)")
     p.add_argument("--java-heap", default="16g", help="fges: Java memory limit, e.g. 16g")
+    p.add_argument("--fges-bound", type=int, default=0,
+                   help="fges: only allow edges among each variable's top-K partial correlations (0 = no bound); "
+                        "e.g. 20 makes fges practical at thousands of variables")
 
 
-def _options(args, n_rows: int) -> dict:
-    penalty = args.penalty
-    if args.min_partial_corr is not None:
-        from .fges import penalty_for_min_partial_corr
-        penalty = penalty_for_min_partial_corr(args.min_partial_corr, n_rows)
-        logging.info("min partial correlation %.3g -> BIC penalty %.2f", args.min_partial_corr, penalty)
+def _options(args) -> dict:
     fit = {"lambda1": args.lambda1, "w_threshold": args.w_threshold, "device": args.device}
     return {"dagma_fit": fit,
-            "dagma_hc": {"k": args.k, "penalty": penalty, "max_parents": args.max_parents, "restarts": args.restarts,
-                         "candidates": args.candidates, "tabu": args.tabu},
-            "fges": {"penalty": penalty, "threads": args.threads, "max_degree": args.max_degree,
-                     "max_heap": args.java_heap}}
+            "dagma_hc": {"k": args.k, "penalty": args.penalty, "min_partial_corr": args.min_partial_corr,
+                         "max_parents": args.max_parents, "restarts": args.restarts, "candidates": args.candidates,
+                         "tabu": args.tabu},
+            "fges": {"penalty": args.penalty, "min_partial_corr": args.min_partial_corr, "threads": args.threads,
+                     "max_degree": args.max_degree, "max_heap": args.java_heap, "bound_k": args.fges_bound}}
 
 
 def _load(args):
@@ -103,7 +102,7 @@ def main(argv=None) -> int:
         return 0
 
     df = _load(args)
-    opts = _options(args, len(df))
+    opts = _options(args)
     if args.cmd == "run":
         from .benchmark import run_method, save_graph
         from .data import Preprocessor

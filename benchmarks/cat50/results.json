@@ -1,0 +1,101 @@
+{
+  "split": "random",
+  "test_frac": 0.2,
+  "seed": 0,
+  "data_type": "categorical",
+  "n_train": 16000,
+  "n_test": 4000,
+  "n_variables": 50,
+  "methods": [
+    {
+      "method": "empty graph",
+      "edges": 0,
+      "acyclic": true,
+      "seconds": 0.0,
+      "heldout_loglik_per_row": -43.23959746968819,
+      "per_variable": -0.8647919493937638,
+      "gain_vs_empty_per_row": 0.0,
+      "gain_vs_empty_95ci": 0.0,
+      "true_edges": 90,
+      "directed_precision": 0.0,
+      "directed_recall": 0.0,
+      "directed_f1": 0.0,
+      "skeleton_precision": 0.0,
+      "skeleton_recall": 0.0,
+      "skeleton_f1": 0.0,
+      "reversed": 0,
+      "shd": 90
+    },
+    {
+      "method": "dagma",
+      "edges": 13,
+      "acyclic": true,
+      "seconds": 11.1,
+      "heldout_loglik_per_row": -40.73788092677704,
+      "per_variable": -0.8147576185355407,
+      "gain_vs_empty_per_row": 2.501716542911149,
+      "gain_vs_empty_95ci": 0.05492358400459264,
+      "true_edges": 90,
+      "directed_precision": 0.615,
+      "directed_recall": 0.089,
+      "directed_f1": 0.155,
+      "skeleton_precision": 1.0,
+      "skeleton_recall": 0.144,
+      "skeleton_f1": 0.252,
+      "reversed": 5,
+      "shd": 82
+    },
+    {
+      "method": "dagma_hc",
+      "edges": 92,
+      "acyclic": true,
+      "seconds": 12.1,
+      "heldout_loglik_per_row": -32.673330120306474,
+      "per_variable": -0.6534666024061295,
+      "gain_vs_empty_per_row": 10.566267349381713,
+      "gain_vs_empty_95ci": 0.12053460001255596,
+      "true_edges": 90,
+      "directed_precision": 0.826,
+      "directed_recall": 0.844,
+      "directed_f1": 0.835,
+      "skeleton_precision": 0.957,
+      "skeleton_recall": 0.978,
+      "skeleton_f1": 0.967,
+      "reversed": 12,
+      "shd": 18
+    }
+  ],
+  "pairwise": [
+    {
+      "comparison": "dagma - dagma_hc",
+      "heldout_loglik_diff_per_row": -8.064550806470564,
+      "95ci": 0.10801689233075132,
+      "skeleton_jaccard": 0.141
+    }
+  ],
+  "details": {
+    "empty graph": {
+      "seconds": 0.0
+    },
+    "dagma": {
+      "seconds": 11.06176906824112,
+      "h_final": 0.0,
+      "acyclic": true
+    },
+    "dagma_hc": {
+      "seconds": 12.130981016904116,
+      "dagma_seconds": 11.06176906824112,
+      "hc_seconds": 1.0692119486629963,
+      "candidate_pairs": 792,
+      "candidates": "dagma+pcorr",
+      "restarts": 5,
+      "steps": 100,
+      "moves": {
+        "add": 94,
+        "delete": 2,
+        "reverse": 4
+      },
+      "bic": -533315.3029189997
+    }
+  }
+}

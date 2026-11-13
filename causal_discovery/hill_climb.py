@@ -255,7 +255,8 @@ class HillClimber:
                          self.local.sum(), time.perf_counter() - t0)
         if tabu and not np.array_equal(best_present, self.present):
             self._restore(best_present)
-        self.steps, self.moves, self.seconds = steps, dict(zip(("add", "delete", "reverse"), counts)), time.perf_counter() - t0
+        self.steps, self.seconds = steps, time.perf_counter() - t0
+        self.moves = dict(zip(("add", "delete", "reverse"), counts))
         A = np.zeros((self.d, self.d), dtype=np.int8)
         A[self.src[self.present], self.dst[self.present]] = 1
         return A
