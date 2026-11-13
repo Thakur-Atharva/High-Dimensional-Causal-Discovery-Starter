@@ -139,6 +139,15 @@ class HillClimber:
             return True
         return not self._reaches(i, j, skip=(i, j))       # reverse: illegal if another path i ~> j remains
 
+    def _first_legal(self, order: np.ndarray, blocked: np.ndarray) -> int | None:
+        E = len(self.src)
+        for m in order:
+            m = int(m)
+            if self._legal(m // E, m % E):
+                return m
+            blocked[m] = True
+        return None
+
     def _apply(self, kind: int, e: int) -> None:
         i, j = int(self.src[e]), int(self.dst[e])
         if kind == 0:
@@ -180,10 +189,13 @@ class HillClimber:
         E = len(self.src)
         best_score, best_present, since_best = self.local.sum(), self.present.copy(), 0
         recent: list[tuple[int, int]] = []                # (kind, edge) moves that would undo a recent change
+        # Moves found to close a cycle. Adding edges only creates paths, so such a move stays illegal until an
+        # edge is deleted or reversed; remembering them avoids re-checking the same moves at every step.
+        blocked = np.zeros(3 * E, dtype=bool)
         while max_steps is None or steps < max_steps:
             gains = np.concatenate([self.d_add, self.d_del, self.d_rev])
             floor = -np.inf if tabu else tol             # tabu search may take downhill moves
-            ok = gains > floor
+            ok = (gains > floor) & ~blocked
             if tabu and recent:
                 for kind, e in recent:
                     ok[kind * E + e] = False
@@ -195,17 +207,19 @@ class HillClimber:
                 kth = np.partition(-gains[cand], 63)[63]
                 cand = cand[-gains[cand] <= kth + 1e-6]
             order = cand[np.lexsort((cand, -self.priority[cand], -np.round(gains[cand], 6)))]
-            chosen = next((int(m) for m in order if self._legal(int(m) // E, int(m) % E)), None)
-            if chosen is None:                            # all of the best 64 would close a cycle: scan the rest
-                rest = np.nonzero(ok)[0]
+            chosen = self._first_legal(order, blocked)
+            if chosen is None:                            # all of the best would close a cycle: scan the rest
+                rest = np.nonzero(ok & ~blocked)[0]
                 rest = rest[np.lexsort((rest, -self.priority[rest], -np.round(gains[rest], 6)))]
-                chosen = next((int(m) for m in rest if self._legal(int(m) // E, int(m) % E)), None)
+                chosen = self._first_legal(rest, blocked)
                 if chosen is None:
                     break
             kind, e = divmod(chosen, E)
             if gains[chosen] <= tol and not tabu:
                 break
             self._apply(kind, e)
+            if kind:                                      # a deletion or reversal can make blocked moves legal again
+                blocked[:] = False
             steps += 1
             counts[kind] += 1
             if tabu:
