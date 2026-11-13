@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "causal-discovery-starter"
+version = "0.1.0"
+description = "DAGMA, DAGMA + BIC hill climbing and fGES for large tabular datasets, with a held-out benchmark"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Apache-2.0" }
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "pandas>=2.1",
+    "pyarrow>=14",
+    "tabulate>=0.9",
+    "torch>=2.4",
+]
+
+[project.optional-dependencies]
+fges = ["JPype1>=1.5", "py-tetrad @ git+https://github.com/cmu-phil/py-tetrad@5f58826d1d1fbfc36dd59177656eec6b1cff68db"]
+dev = ["pytest>=8"]
+
+[tool.setuptools.packages.find]
+include = ["causal_discovery*"]

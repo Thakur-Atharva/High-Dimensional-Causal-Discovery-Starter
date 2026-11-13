@@ -1,0 +1,13 @@
+causal-discovery-starter
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+causal_discovery/dagma_torch.py is a PyTorch port of dagma/linear.py from DAGMA
+(https://github.com/kevinsbello/dagma), Copyright Kevin Bello and contributors,
+licensed under the Apache License, Version 2.0. The algorithm and its default
+settings are unchanged; the port moves the computation from NumPy/SciPy to
+PyTorch and accepts a covariance matrix instead of the data matrix.
+
+The optional fGES method calls Tetrad (https://github.com/cmu-phil/tetrad,
+GPL-3.0) through py-tetrad (https://github.com/cmu-phil/py-tetrad, MIT).
+Neither is included in this repository; pip downloads them when the "fges"
+extra is installed.
