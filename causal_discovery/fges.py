@@ -84,8 +84,8 @@ def _search(S: np.ndarray, n: int, penalty: float, pairs, max_degree: int, threa
 
 
 def fges(prep, penalty: float = 1.0, min_partial_corr: float | None = None, max_degree: int = -1,
-         threads: int | None = None, max_heap: str = "16g", bound_k: int = 0, faithfulness: bool = True,
-         verbose: bool = False):
+         threads: int | None = None, max_heap: str = "16g", bound_k: int | None = None,
+         faithfulness: bool = True, verbose: bool = False):
     """Run fGES with the linear-Gaussian BIC (Tetrad's SEM-BIC) on standardized continuous data.
 
     penalty    : BIC penalty multiplier ("penalty discount"); 1 is the textbook BIC. Larger gives sparser graphs.
@@ -95,7 +95,8 @@ def fges(prep, penalty: float = 1.0, min_partial_corr: float | None = None, max_
     max_heap   : Java memory limit, e.g. "16g"; use "64g" at thousands of variables.
     bound_k    : if > 0, only pairs among each variable's bound_k largest partial correlations may get an edge
                  (Tetrad's "bound graph"). With many rows, fGES otherwise starts from nearly every pair of variables,
-                 which is slow above a few hundred variables (see README).
+                 which is slow above a few hundred variables (see README). None (default): 20 from 500 variables
+                 up, otherwise no bound.
     """
     if prep.data_type != "continuous":
         raise ValueError("fGES here uses the linear-Gaussian score; for categorical data see README ('fGES on "
@@ -107,6 +108,8 @@ def fges(prep, penalty: float = 1.0, min_partial_corr: float | None = None, max_
     del Xc
     penalty = resolve_penalty(penalty, min_partial_corr, n)
     pairs = None
+    if bound_k is None:
+        bound_k = 20 if X.shape[1] >= 500 else 0
     if bound_k > 0:
         from .hill_climb import candidate_pairs, partial_correlations
         pairs = candidate_pairs(partial_correlations(X), k=bound_k)

@@ -10,19 +10,22 @@ from pathlib import Path
 import pandas as pd
 
 HERE = Path(__file__).resolve().parent
-RUNS = [  # folder, label, method rename for tabu runs
+RUNS = [  # folder, dataset label, suffix for the method name
     ("cont100", "Continuous, 100 variables, 20,000 rows", ""),
     ("cont100_tabu", "Continuous, 100 variables, 20,000 rows", " (tabu 10)"),
+    ("cont100_fges_bound", "Continuous, 100 variables, 20,000 rows", ""),
     ("cont500", "Continuous, 500 variables, 50,000 rows", ""),
     ("cont500_tabu", "Continuous, 500 variables, 50,000 rows", " (tabu 10)"),
+    ("cont500_fges_unbounded", "Continuous, 500 variables, 50,000 rows", ""),
     ("cont2500", "Continuous, 2,500 variables, 100,000 rows", ""),
     ("cat50", "Categorical, 50 variables, 20,000 rows", ""),
 ]
 NAMES = {"dagma": "DAGMA", "dagma_hc": "DAGMA + hill climbing", "fges": "fGES", "empty graph": "Empty graph"}
-ORDER = ["DAGMA", "DAGMA + hill climbing", "DAGMA + hill climbing (tabu 10)", "fGES"]
-# Okabe-Ito colour-blind-safe colours; one per method family, the tabu variant hollow and dashed.
+ORDER = ["DAGMA", "DAGMA + hill climbing", "DAGMA + hill climbing (tabu 10)", "fGES", "fGES (bound 20)"]
+# Okabe-Ito colour-blind-safe colours; one per method family, the second variant hollow and dashed.
 STYLE = {"DAGMA": ("#D55E00", "o", "-", True), "DAGMA + hill climbing": ("#0072B2", "s", "-", True),
-         "DAGMA + hill climbing (tabu 10)": ("#0072B2", "s", "--", False), "fGES": ("#009E73", "^", "-", True)}
+         "DAGMA + hill climbing (tabu 10)": ("#0072B2", "s", "--", False), "fGES": ("#009E73", "^", "-", True),
+         "fGES (bound 20)": ("#009E73", "^", "--", False)}
 
 
 def load() -> pd.DataFrame:
@@ -35,8 +38,12 @@ def load() -> pd.DataFrame:
         for r in res["methods"]:
             if r["method"] == "empty graph":
                 continue
+            name = NAMES[r["method"]] + suffix
+            bound = res.get("details", {}).get(r["method"], {}).get("bound_k", 0)
+            if r["method"] == "fges" and bound:
+                name = f"fGES (bound {bound})"
             rows.append({**r, "dataset": label, "variables": res["n_variables"], "data_type": res["data_type"],
-                         "method": NAMES[r["method"]] + suffix})
+                         "method": name})
     return pd.DataFrame(rows)
 
 

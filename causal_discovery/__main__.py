@@ -34,9 +34,9 @@ def _common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--threads", type=int, default=None, help="fges: CPU threads (default: all cores)")
     p.add_argument("--max-degree", type=int, default=-1, help="fges: cap on neighbours per variable (-1: none)")
     p.add_argument("--java-heap", default="16g", help="fges: Java memory limit, e.g. 16g")
-    p.add_argument("--fges-bound", type=int, default=0,
-                   help="fges: only allow edges among each variable's top-K partial correlations (0 = no bound); "
-                        "e.g. 20 makes fges practical at thousands of variables")
+    p.add_argument("--fges-bound", type=int, default=None,
+                   help="fges: only allow edges among each variable's top-K partial correlations (0 = no bound). "
+                        "Default: 20 from 500 variables up, otherwise no bound")
 
 
 def _options(args) -> dict:
