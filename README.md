@@ -176,8 +176,8 @@ categorical columns, dropping one level each.
   implementation, checked to give the same result (see NOTICE).
 
 **DAGMA + BIC hill climbing (`dagma_hc`).**
-- **The BIC (Bayesian Information Criterion)** scores a whole graph: how well it predicts the data, minus
-  `(number of parameters / 2) * log(rows)`. Higher is better. It rewards fit but charges for every extra edge.
+- **The BIC (Bayesian Information Criterion)** scores a whole graph: how well it predicts the data,
+  `-(number of parameters / 2) * log(rows)`. Higher is better. It rewards fit but charges for every extra edge.
 - **Hill climbing** starts from an empty graph and repeatedly makes the single change that most improves the BIC:
   add, delete or reverse one arrow. It stops when no change helps.
 - **Why DAGMA is involved:** trying every pair of 2,500 variables at each step is too slow. So DAGMA's weights

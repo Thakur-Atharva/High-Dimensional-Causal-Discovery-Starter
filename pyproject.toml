@@ -20,7 +20,7 @@ dependencies = [
 
 [project.optional-dependencies]
 fges = ["JPype1>=1.5", "py-tetrad @ git+https://github.com/cmu-phil/py-tetrad@5f58826d1d1fbfc36dd59177656eec6b1cff68db"]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "matplotlib>=3.8"]
 
 [tool.setuptools.packages.find]
 include = ["causal_discovery*"]

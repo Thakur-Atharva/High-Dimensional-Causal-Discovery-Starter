@@ -139,6 +139,17 @@ class HillClimber:
             return True
         return not self._reaches(i, j, skip=(i, j))       # reverse: illegal if another path i ~> j remains
 
+    @staticmethod
+    def _closure(start: int, nbrs) -> set:
+        """``start`` plus everything reachable from it through ``nbrs`` (parents: ancestors; children: descendants)."""
+        seen, stack = {start}, [start]
+        while stack:
+            for w in nbrs[stack.pop()]:
+                if w not in seen:
+                    seen.add(w)
+                    stack.append(w)
+        return seen
+
     def _first_legal(self, order: np.ndarray, blocked: np.ndarray) -> int | None:
         E = len(self.src)
         for m in order:
@@ -190,7 +201,7 @@ class HillClimber:
         best_score, best_present, since_best = self.local.sum(), self.present.copy(), 0
         recent: list[tuple[int, int]] = []                # (kind, edge) moves that would undo a recent change
         # Moves found to close a cycle. Adding edges only creates paths, so such a move stays illegal until an
-        # edge is deleted or reversed; remembering them avoids re-checking the same moves at every step.
+        # edge on that cycle is deleted or reversed; remembering them avoids re-checking them at every step.
         blocked = np.zeros(3 * E, dtype=bool)
         while max_steps is None or steps < max_steps:
             gains = np.concatenate([self.d_add, self.d_del, self.d_rev])
@@ -217,9 +228,16 @@ class HillClimber:
             kind, e = divmod(chosen, E)
             if gains[chosen] <= tol and not tabu:
                 break
+            if kind:
+                # Removing i -> j can only unblock moves whose cycle ran through it: add a -> b with a downstream of
+                # j and b upstream of i, or reverse i' -> j' with i' upstream of i and j' downstream of j.
+                i, j = int(self.src[e]), int(self.dst[e])
+                up = np.zeros(self.d, dtype=bool); up[list(self._closure(i, self.parents))] = True
+                down = np.zeros(self.d, dtype=bool); down[list(self._closure(j, self.children))] = True
             self._apply(kind, e)
-            if kind:                                      # a deletion or reversal can make blocked moves legal again
-                blocked[:] = False
+            if kind:
+                blocked[:E][down[self.src] & up[self.dst]] = False
+                blocked[2 * E:][up[self.src] & down[self.dst]] = False
             steps += 1
             counts[kind] += 1
             if tabu:
