@@ -7,9 +7,9 @@ on held-out rows.
 |---|---|---|
 | `dagma` | **DAGMA** (Bello et al., NeurIPS 2022), the way it is usually run: linear model, library defaults | Python; a GPU strongly recommended above ~500 columns |
 | `dagma_hc` | **DAGMA + BIC hill climbing**: DAGMA (plus partial correlations) proposes likely neighbours for each column, then a greedy search scored by the BIC decides which edges to keep and their direction | Python (+ GPU for the DAGMA part) |
-| `fges` | **fGES** (Fast Greedy Equivalence Search) from CMU's Tetrad, the most widely used score-based method that scales to thousands of variables | Java 21+ and the `py-tetrad` package |
+| `fges` | **fGES** (Fast Greedy Equivalence Search) from CMU's Tetrad, the score-based method with the strongest published evidence of scaling to thousands of variables | Java 21+ and the `py-tetrad` package |
 
-<!-- RESULTS -->
+**On simulated data at the target size** (2,500 variables, 100,000 rows), fGES recovered the true graph's connections with F1 0.98 in under 3 minutes. DAGMA + hill climbing reached 0.90 in 15 minutes, and DAGMA alone 0.62. Section 4 has the details, and explains the metrics.
 
 ---
 
@@ -103,14 +103,15 @@ tables and the figure.
 
 **How it was run:**
 - A random 20% of rows was held out; every method learned on the other 80%.
+- fGES ran both unbounded and bounded (`--fges-bound 20`) where both were feasible; at 2,500 variables only bounded.
 - Hardware: one NVIDIA RTX 4090 for DAGMA, and 16 CPU cores for hill climbing and fGES.
 - Settings: defaults throughout (`--penalty 1`, 5 restarts, `k = 20`). The "(tabu 10)" row is the same as the row
   above it except for `--tabu 10`.
 
 ### What the accuracy metrics mean
 
-The first three compare the learned graph with the true one, so they exist only for simulated data. The last one
-needs no true graph, so it is the one you can use on real data.
+Skeleton F1, directed F1 and SHD compare the learned graph with the true one, so they exist only for simulated data.
+Held-out gain needs no true graph, so it is the one you can use on real data.
 
 | Metric | What it measures | Best value |
 |---|---|---|
@@ -128,7 +129,77 @@ needs no true graph, so it is the one you can use on real data.
 Each line is one method. Its points are the 100-, 500- and 2,500-variable datasets (labelled), placed by runtime
 (horizontal, log scale) and accuracy (vertical).
 
-<!-- SUMMARY TABLES -->
+**Continuous, 100 variables, 20,000 rows** (true graph: 191 edges)
+
+| Method                          |   Time (s) |   Edges |   Skeleton F1 |   Directed F1 |   SHD |   Held-out gain / row |
+|:--------------------------------|-----------:|--------:|--------------:|--------------:|------:|----------------------:|
+| DAGMA                           |         36 |     205 |          0.58 |          0.31 |   220 |                  84.7 |
+| DAGMA + hill climbing           |         39 |     295 |          0.78 |          0.66 |   136 |                 105.8 |
+| DAGMA + hill climbing (tabu 10) |         39 |     291 |          0.78 |          0.68 |   128 |                 105.8 |
+| fGES                            |         10 |     252 |          0.8  |          0.72 |   108 |                 103   |
+| fGES (bound 20)                 |          3 |     266 |          0.78 |          0.64 |   133 |                  99.1 |
+
+**Continuous, 500 variables, 50,000 rows** (true graph: 987 edges)
+
+| Method                          |   Time (s) |   Edges |   Skeleton F1 |   Directed F1 |   SHD |   Held-out gain / row |
+|:--------------------------------|-----------:|--------:|--------------:|--------------:|------:|----------------------:|
+| DAGMA                           |         54 |     720 |          0.6  |          0.34 |   906 |                 379.6 |
+| DAGMA + hill climbing           |         64 |    1235 |          0.88 |          0.76 |   400 |                 600.6 |
+| DAGMA + hill climbing (tabu 10) |         67 |    1220 |          0.88 |          0.77 |   383 |                 600.6 |
+| fGES                            |        330 |    1189 |          0.89 |          0.84 |   295 |                 594.5 |
+| fGES (bound 20)                 |         16 |    1064 |          0.95 |          0.89 |   163 |                 586.6 |
+
+**Continuous, 2,500 variables, 100,000 rows** (true graph: 4956 edges)
+
+| Method                |   Time (s) |   Edges |   Skeleton F1 |   Directed F1 |   SHD |   Held-out gain / row |
+|:----------------------|-----------:|--------:|--------------:|--------------:|------:|----------------------:|
+| DAGMA                 |        772 |    3779 |          0.62 |          0.38 |  4388 |                1861.7 |
+| DAGMA + hill climbing |        901 |    6109 |          0.9  |          0.78 |  1812 |                2898.1 |
+| fGES (bound 20)       |        167 |    5083 |          0.98 |          0.94 |   402 |                2880.8 |
+
+**Categorical, 50 variables, 20,000 rows** (true graph: 90 edges)
+
+| Method                |   Time (s) |   Edges |   Skeleton F1 |   Directed F1 |   SHD |   Held-out gain / row |
+|:----------------------|-----------:|--------:|--------------:|--------------:|------:|----------------------:|
+| DAGMA                 |         11 |      13 |          0.25 |          0.16 |    82 |                   2.5 |
+| DAGMA + hill climbing |         12 |      92 |          0.97 |          0.84 |    18 |                  10.6 |
+
+### What the results say
+
+- **At the target size (2,500 variables, 100,000 rows), fGES is both the fastest and the most accurate.** Bounded
+  to each variable's top 20 partial correlations, it found the true connections with skeleton F1 0.98 and directed
+  F1 0.94 in under 3 minutes on 16 CPU cores.
+  - DAGMA + hill climbing reached 0.90 and 0.78 in 15 minutes, most of it the DAGMA fit on the GPU.
+  - DAGMA alone reached 0.62 and 0.38.
+- **Unbounded fGES** was the most accurate method at 100 variables. It gets slow quickly as variables are added
+  (10 s at 100, 330 s at 500), and at 2,500 it had not finished after 2.5 hours. The bounded version was faster and
+  more accurate at 500 and 2,500 variables, but less accurate at 100. That is why fGES is bounded by default from
+  500 variables up.
+- **DAGMA on its own misses much of the structure,** mostly because of its fixed 0.3 weight cut-off. Its directions
+  are also unreliable on standardized data.
+- **DAGMA + hill climbing fixes most of that.** Its main weakness is extra edges (6,109 against 4,956 true at
+  2,500 variables), because greedy hill climbing gets stuck and compensates for wrong directions with additional
+  edges. Tabu search (`--tabu 10`) helped only slightly here.
+- **Held-out likelihood cannot rank graphs that are both nearly right.** At 2,500 variables DAGMA + hill climbing
+  scores slightly *higher* on held-out rows than fGES (2,898 against 2,881 per row), although fGES is far more
+  accurate (SHD 402 against 1,812). Extra edges cost almost nothing in prediction with this many rows. On real data,
+  use held-out likelihood to spot missing structure (DAGMA alone is far behind) and the edge counts and agreement
+  between methods to judge the rest.
+- **Categorical data:** DAGMA + hill climbing recovers the graph well (skeleton F1 0.97). fGES is not wired for
+  categorical data in this package.
+- **These are best-case numbers.** The simulations satisfy every assumption in section 1: linear relationships, no
+  hidden variables, independent rows. Expect lower accuracy on real data.
+
+**Runtime at 2,500 variables x 100,000 rows** (RTX 4090 + 16 cores; the whole benchmark took about 20 minutes,
+including loading and scoring):
+
+| Step | Time |
+|---|---|
+| DAGMA fit (GPU) | 13 minutes |
+| Hill climbing (5 restarts, CPU) | 2 minutes |
+| fGES, bounded (16 CPU cores, 64 GB Java heap) | 3 minutes |
+| Memory | ran within a 128 GB allocation, 64 GB of it the Java heap for fGES (a 16 GB heap ran out of memory with unbounded fGES) |
+
 
 ## 5. Your data
 
@@ -181,12 +252,12 @@ This writes `edges.csv`, `adjacency.npy` (`A[i, j] = 1` means column i -> column
 | `--penalty` | 1 (standard BIC) | Applies to `dagma_hc` and `fges`. **With 100,000 rows, real data often give very dense graphs**, because BIC then accepts even tiny dependences. Raise it (2 to 10) for sparser graphs |
 | `--min-partial-corr` | off | The same idea in interpretable units: only keep edges whose partial correlation is at least this, e.g. `0.03` or `0.05`. Overrides `--penalty` |
 | `--k` | 20 | `dagma_hc`: candidate neighbours per variable from each source. More finds more true edges but runs slower |
-| `--tabu` | 0 | `dagma_hc`: set to 10 for tabu search, which may take a few downhill moves to escape a local optimum. In simulations it found higher-BIC, more accurate graphs at no extra cost (skeleton F1 +0.03 to +0.09) |
+| `--tabu` | 0 | `dagma_hc`: set to 10 for tabu search, which may take a few downhill moves to escape a local optimum. In the benchmark (section 4) it slightly improved directed F1 (+0.01 to +0.02) at no extra cost |
 | `--candidates` | `dagma+pcorr` | `dagma_hc`: `dagma` uses only DAGMA's proposals; the default adds each variable's largest partial correlations |
 | `--restarts` | 5 | `dagma_hc`: number of hill-climbing runs with different tie-breaking; the best-scoring graph is kept |
 | `--lambda1`, `--w-threshold` | 0.03, 0.3 | DAGMA's own sparsity weight and edge cut-off (the library defaults) |
-| `--threads`, `--max-degree`, `--java-heap` | all cores, none, 16g | `fges` runtime and memory. At 2,500 variables fGES needs more Java memory: use `--java-heap 64g` (16g ran out on the simulated benchmark). `--max-degree 20`, or a higher `--penalty`, bounds runtime on dense data |
-| `--fges-bound` | 0 (off) | `fges`: only allow edges among each variable's top-K partial correlations, e.g. `20`. With many rows, fGES otherwise starts from almost every pair of variables, because nearly everything is weakly correlated with everything else. That made it run for hours (and run out of Java memory) on our 2,500-variable simulation. Bounding makes it practical at that size, at some cost in accuracy (section 4) |
+| `--threads`, `--max-degree`, `--java-heap` | all cores, none, 16g | `fges` runtime and memory. At 2,500 variables use `--java-heap 64g`, as in our benchmark: 16g ran out of memory for unbounded fGES at that size. `--max-degree` caps neighbours per variable, another way to bound runtime (not tested here). In our test, a higher `--penalty` barely changed fGES's runtime; `--fges-bound` is what made it fast |
+| `--fges-bound` | 20 from 500 variables, else off | `fges`: only allow edges among each variable's top-K partial correlations (`0` turns it off). With many rows, fGES otherwise starts from almost every pair of variables, because nearly everything is weakly correlated with everything else. Unbounded, it had not finished after 2.5 hours on our 2,500-variable simulation; bounded, it took 3 minutes and was more accurate (section 4) |
 | `--device` | `cuda` if available | `dagma`: `cpu` works but is slow above ~500 columns |
 | `--data-type` | `auto` | `continuous` or `categorical`. `auto` calls a table categorical if every column has at most 20 distinct integer values |
 
@@ -247,7 +318,8 @@ categorical columns, dropping one level each.
   section 1. It has been run on 30,000 variables in minutes and a million in hours (Ramsey et al. 2017).
 - **Output:** the class (a "CPDAG"). `info.json` reports how many edges it left undirected. The code picks one DAG
   from the class for scoring; all DAGs in a class score the same.
-- **Code:** `causal_discovery/fges.py`, which calls Tetrad through py-tetrad.
+- **Bound:** at large sizes the search is limited to each variable's top-20 partial correlations (`--fges-bound`), because in large, connected data nearly every pair is weakly correlated.
+- **Code:** `causal_discovery/fges.py`, which calls Tetrad through py-tetrad in a separate process.
 
 ## 8. Using it from Python
 
@@ -276,6 +348,7 @@ causal_discovery/
   simulate.py      synthetic data with a known graph
   __main__.py      command line (simulate / run / benchmark)
 tests/             quick checks (pytest)
+benchmarks/        the simulated-data benchmark: run_simulated.sh, summarize.py, and the results (section 4)
 ```
 
 ## 10. References

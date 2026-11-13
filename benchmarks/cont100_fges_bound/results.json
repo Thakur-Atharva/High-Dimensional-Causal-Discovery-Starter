@@ -1,0 +1,62 @@
+{
+  "split": "random",
+  "test_frac": 0.2,
+  "seed": 0,
+  "data_type": "continuous",
+  "n_train": 16000,
+  "n_test": 4000,
+  "n_variables": 100,
+  "methods": [
+    {
+      "method": "empty graph",
+      "edges": 0,
+      "acyclic": true,
+      "seconds": 0.0,
+      "heldout_loglik_per_row": -247.82761078481172,
+      "per_variable": -2.4782761078481172,
+      "gain_vs_empty_per_row": 0.0,
+      "gain_vs_empty_95ci": 0.0,
+      "true_edges": 191,
+      "directed_precision": 0.0,
+      "directed_recall": 0.0,
+      "directed_f1": 0.0,
+      "skeleton_precision": 0.0,
+      "skeleton_recall": 0.0,
+      "skeleton_f1": 0.0,
+      "reversed": 0,
+      "shd": 191
+    },
+    {
+      "method": "fges",
+      "edges": 266,
+      "acyclic": true,
+      "seconds": 2.9,
+      "heldout_loglik_per_row": -148.72123390785003,
+      "per_variable": -1.4872123390785004,
+      "gain_vs_empty_per_row": 99.10637687696173,
+      "gain_vs_empty_95ci": 0.4918233474360566,
+      "true_edges": 191,
+      "directed_precision": 0.553,
+      "directed_recall": 0.77,
+      "directed_f1": 0.643,
+      "skeleton_precision": 0.665,
+      "skeleton_recall": 0.927,
+      "skeleton_f1": 0.775,
+      "reversed": 30,
+      "shd": 133
+    }
+  ],
+  "pairwise": [],
+  "details": {
+    "empty graph": {
+      "seconds": 0.0
+    },
+    "fges": {
+      "seconds": 2.936348907649517,
+      "cpdag_directed": 258,
+      "cpdag_undirected": 8,
+      "penalty": 1.0,
+      "bound_k": 20
+    }
+  }
+}
