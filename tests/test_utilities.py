@@ -494,3 +494,68 @@ def test_covariance_blocked_matches_direct():
     from utilities.fitting import covariance
     X = np.random.default_rng(0).normal(size=(50, 23))
     np.testing.assert_allclose(covariance(X, block=7), X.T @ X / 50, rtol=1e-12, atol=1e-12)
+
+
+def test_viewer_no_edges(tmp_path):
+    from utilities.plot_edges import main as plot_main
+    pd.DataFrame(columns=["source", "target", "weight"]).to_csv(tmp_path / "e.csv", index=False)
+    with pytest.raises(SystemExit, match="no edges"):
+        plot_main(["--edges", str(tmp_path / "e.csv"), "--out", str(tmp_path / "e.html")])
+
+
+def test_viewer_min_weight_without_weight_column(tmp_path):
+    from utilities.plot_edges import main as plot_main
+    pd.DataFrame({"source": ["X1", "X2"], "target": ["X2", "X3"]}).to_csv(tmp_path / "e.csv", index=False)
+    assert plot_main(["--edges", str(tmp_path / "e.csv"), "--min-weight", "0.4", "--out", str(tmp_path / "e.html")]) == 0
+    assert "X3" in (tmp_path / "e.html").read_text()
+
+
+def test_lasso_nonconvergence_reported(prepared, tmp_path):
+    from utilities.run_dagma import main as run_main
+    prep, _, _ = prepared
+    assert run_main(["benchmark", "--prepared", str(prep), "--out", str(tmp_path / "b"), "--solver", "lasso",
+                     "--device", "cpu", "--jobs", "1", "--lasso-max-iter", "1"]) == 0
+    info = json.loads((tmp_path / "b" / "info.json").read_text())
+    assert info["converged"] is False and info["kkt_violation"] > 0
+    assert "did not converge" in (tmp_path / "b" / "results.md").read_text()
+
+
+def test_load_rejects_duplicate_headers(tmp_path):
+    p = tmp_path / "d.csv"
+    p.write_text("lot_id,1_S:a,1_S:a,1_S:a::mach\nL1,1,1,M\n")
+    with pytest.raises(ValueError, match="duplicate.*1_S:a"):
+        load_presence_matrix(p)
+
+
+def test_no_gpu_stops_large_fit(prepared, tmp_path, monkeypatch):
+    import utilities.fitting as F
+    from utilities.run_dagma import main as run_main
+    prep, _, _ = prepared
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    monkeypatch.setattr(F, "CPU_MAX_D", 10)
+    with pytest.raises(SystemExit, match="No GPU"):
+        run_main(["fit", "--prepared", str(prep), "--out", str(tmp_path / "f"), "--solver", "lasso"])
+
+
+def test_ignore_unparsed_recorded(tmp_path):
+    from utilities.preprocess import main as preprocess_main
+    df, _ = simulate_presence(n_lots=300, n_steps=10, rare_steps=0, seed=7)
+    df.insert(1, "weird", "x")
+    df.to_csv(tmp_path / "w.csv", index=False)
+    assert preprocess_main(["--input", str(tmp_path / "w.csv"), "--out", str(tmp_path / "p"), "--ignore-unparsed"]) == 0
+    cols = pd.read_csv(tmp_path / "p" / "columns.csv").set_index("name")
+    assert cols.loc["weird", "drop_reason"] == "unparsed" and not cols.loc["weird", "kept"]
+    assert json.loads((tmp_path / "p" / "summary.json").read_text())["columns_unparsed"] == 1
+
+
+def test_preprocess_reports_near_duplicates(tmp_path):
+    from utilities.preprocess import main as preprocess_main
+    df, _ = simulate_presence(n_lots=2000, n_steps=12, rare_steps=0, seed=8)
+    a, b = df.columns[7], df.columns[9]                     # presence columns of steps 4 and 5
+    rng = np.random.default_rng(0)
+    flip = rng.random(len(df)) < 0.01                       # step 5 visited by the same lots as step 4, 1% differ
+    df[b] = np.where(flip, 1 - (df[a] > 0), (df[a] > 0)).astype(np.int8)
+    df[b + "::mach"] = np.where(df[b] > 0, "M5", "")
+    df.to_csv(tmp_path / "n.csv", index=False)
+    assert preprocess_main(["--input", str(tmp_path / "n.csv"), "--out", str(tmp_path / "p")]) == 0
+    assert json.loads((tmp_path / "p" / "summary.json").read_text())["near_duplicate_indicator_pairs"] >= 1

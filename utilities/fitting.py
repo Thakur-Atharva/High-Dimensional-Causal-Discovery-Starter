@@ -17,6 +17,8 @@ from .presence import parse_columns, find_tied_steps
 
 log = logging.getLogger(__name__)
 
+CPU_MAX_D = 5_000          # above this many DAGMA columns, a CPU fit needs an explicit --device cpu
+
 
 @dataclass
 class FitResult:
@@ -68,7 +70,7 @@ def covariance(X: np.ndarray, block: int = 4096) -> np.ndarray:
 
 def learn_graph(df: pd.DataFrame, columns: pd.DataFrame, *, solver: str = "dagma", lambda1: float = 0.03,
                 w_threshold: float = 0.3, time_order: bool = True, device=None, warm_iter: int = 30_000,
-                max_iter: int = 60_000, verbose: bool = True) -> FitResult:
+                max_iter: int = 60_000, lasso_max_iter: int = 20_000, verbose: bool = True) -> FitResult:
     """Fit on the rows of ``df`` (the kept columns of a prepared folder)."""
     t0 = time.perf_counter()
     enc, cov, mask = prepare_problem(df, columns, time_order)
@@ -85,26 +87,52 @@ def learn_graph(df: pd.DataFrame, columns: pd.DataFrame, *, solver: str = "dagma
                              "so edges between those steps may go both ways and --solver lasso cannot be used. "
                              "Use --solver dagma, or give the steps distinct numbers.")
         raise SystemExit("--no-time-order allows cycles, so --solver lasso cannot be used; use --solver dagma")
-    device = torch.device(device) if device is not None else default_device()
+    explicit = device is not None
+    device = torch.device(device) if explicit else default_device()
+    if device.type == "cpu" and not explicit and d > CPU_MAX_D:
+        raise SystemExit(f"No GPU is visible to PyTorch (torch.cuda.is_available() is False), and fitting {d} DAGMA "
+                         "columns on the CPU would take very long. Check nvidia-smi and that your torch build has "
+                         "CUDA, or pass --device cpu to run on the CPU anyway.")
+    log.info("fitting on %s", device)
     check_gpu_memory(d, solver, device)
     on_gpu = device.type == "cuda" and torch.cuda.is_available()
     if on_gpu:
         torch.cuda.reset_peak_memory_stats(device)
     if solver == "lasso":
         model = MaskedLasso(device=device, verbose=verbose)
-        model.fit(cov, mask, lambda1=lambda1, w_threshold=w_threshold)
+        model.fit(cov, mask, lambda1=lambda1, w_threshold=w_threshold, max_iter=lasso_max_iter)
         skipped, iterations = True, model.iterations
+        converged, kkt = model.converged, model.kkt_violation
     elif solver == "dagma":
         model = DagmaLinear(device=device, verbose=verbose)
         model.fit(cov=cov, mask=mask, lambda1=lambda1, w_threshold=w_threshold, warm_iter=warm_iter, max_iter=max_iter)
         skipped, iterations = model.skipped_acyclicity, None
+        converged, kkt = None, None
     else:
         raise ValueError("solver must be 'dagma' or 'lasso'")
     info = {"d": d, "n_rows": n, "solver": solver, "skipped_acyclicity": bool(skipped),
             "seconds": round(float(model.seconds), 1), "h_final": float(model.h_final), "iterations": iterations,
+            "converged": converged, "kkt_violation": kkt,
             "time_order": time_order, "lambda1": lambda1, "w_threshold": w_threshold, "device": str(device),
             "peak_gpu_gb": round(torch.cuda.max_memory_allocated(device) / 1e9, 2) if on_gpu else None}
     return FitResult(model.W_raw, enc, info)
+
+
+def count_near_duplicates(X: np.ndarray, columns: list[str], threshold: float = 0.95, block: int = 4096) -> int:
+    """Pairs of indicators from different columns with |correlation| >= threshold (X standardized, columns of X).
+
+    DAGMA's L1 penalty splits an effect's weight across such near-copies, so each can fall below the edge cut-off.
+    """
+    n, d = X.shape
+    col = pd.factorize(pd.Series(columns))[0]
+    total = 0
+    for a in range(0, d, block):
+        b = min(a + block, d)
+        hit = np.abs(X[:, a:b].T @ X / n) >= threshold
+        hit &= np.arange(d)[None, :] > np.arange(a, b)[:, None]          # each pair once
+        hit &= col[a:b, None] != col[None, :]
+        total += int(hit.sum())
+    return total
 
 
 def column_parents(edges: pd.DataFrame) -> dict[str, list[str]]:

@@ -6,9 +6,10 @@ position in time.
 """
 from __future__ import annotations
 
+import csv
 import logging
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
@@ -60,13 +61,19 @@ def load_presence_matrix(path: str | Path, id_column: str = "lot_id",
     columns if a presence value is missing or not 0/1/2, or if a column name doesn't match the pattern (unless
     ``ignore_unparsed``).
     """
-    header = [str(c) for c in pd.read_csv(path, nrows=0, encoding="utf-8-sig").columns]
+    with open(path, newline="", encoding="utf-8-sig") as f:
+        header = next(csv.reader(f), [])
+    dups = [name for name, k in Counter(header).items() if k > 1]
+    if dups:                                   # pandas would silently rename them to "name.1", "name.2", ...
+        raise ValueError(f"{len(dups)} column name(s) appear more than once in the header (duplicate): {dups[:10]}")
     if id_column not in header:
         raise ValueError(f"id column {id_column!r} not found; the first columns are {header[:5]} (see --id-column)")
     infos, unparsed = parse_columns(header, id_column)
     if unparsed and not ignore_unparsed:
         raise ValueError(f"{len(unparsed)} column name(s) don't match 'N_stage:step' or 'N_stage:step::mach': "
                          f"{unparsed[:10]}. Fix them, or pass --ignore-unparsed to skip them.")
+    if unparsed:
+        log.warning("skipping %d column(s) whose names don't match the pattern: %s", len(unparsed), unparsed[:10])
     if not infos:
         raise ValueError("no step columns found")
     presence = [i.name for i in infos if i.kind == "presence"]
@@ -93,7 +100,9 @@ def load_presence_matrix(path: str | Path, id_column: str = "lot_id",
     if not df[id_column].is_unique:
         log.warning("%s values are not unique (%d duplicates)", id_column, int(df[id_column].duplicated().sum()))
     order = [id_column] + [i.name for i in infos]
-    return pd.DataFrame({c: out[c] for c in order}), infos
+    table = pd.DataFrame({c: out[c] for c in order})
+    table.attrs["unparsed"] = unparsed         # recorded in columns.csv by utilities.preprocess
+    return table, infos
 
 
 def _steps(infos: list[ColumnInfo]) -> list[tuple[str, dict[str, ColumnInfo]]]:

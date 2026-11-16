@@ -84,6 +84,7 @@ class MaskedLasso:
         if not self.converged:
             log.warning("MaskedLasso: not converged after %d iterations (KKT violation %.2e > %.2e)", k, viol, kkt_tol)
         self.iterations = k
+        self.kkt_violation = float(viol)
         self.seconds = time.perf_counter() - t0
         self.h_final = 0.0
         self.W_raw = W.detach().cpu().numpy().astype(np.float64)

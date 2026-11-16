@@ -15,7 +15,10 @@ import logging
 import sys
 from pathlib import Path
 
-from .encoding import estimate_gpu_gb, fit_encoding
+import pandas as pd
+
+from .encoding import estimate_gpu_gb, fit_encoding, indicator_matrix
+from .fitting import count_near_duplicates
 from .presence import filter_and_pool, find_tied_steps, load_presence_matrix, parse_columns
 
 log = logging.getLogger(__name__)
@@ -51,15 +54,26 @@ def main(argv=None) -> int:
 
     df, infos = load_presence_matrix(args.input, args.id_column, args.ignore_unparsed)
     log.info("read %d lots x %d step columns", len(df), len(infos))
+    unparsed = df.attrs.get("unparsed", [])
     kept, table, summary = filter_and_pool(df, infos, args.id_column, args.min_lots, args.min_machine_lots)
+    if unparsed:
+        table = pd.concat([table, pd.DataFrame({"name": unparsed, "kept": False, "drop_reason": "unparsed"})],
+                          ignore_index=True)
     kept_infos, _ = parse_columns(list(kept.columns), args.id_column)
     tied = find_tied_steps(kept_infos)
     enc = fit_encoding(kept, table)
     d = len(enc.names)
+    X = indicator_matrix(kept, enc)
+    X -= X.mean(axis=0)
+    X /= X.std(axis=0)
+    near = count_near_duplicates(X, enc.column)
+    del X
     summary.update({"min_lots": args.min_lots,
                     "min_machine_lots": args.min_machine_lots if args.min_machine_lots is not None else args.min_lots,
                     "tied_step_numbers": {str(k): v for k, v in tied.items()},
+                    "columns_unparsed": len(unparsed),
                     "encoded_columns": d, "identical_indicators_merged": int(sum(map(len, enc.aliases.values()))),
+                    "near_duplicate_indicator_pairs": near,
                     "gpu_gb_dagma": float(f"{estimate_gpu_gb(d, 'dagma'):.3g}"),
                     "gpu_gb_lasso": float(f"{estimate_gpu_gb(d, 'lasso'):.3g}"),
                     "runtime_note": runtime_note(d)})
@@ -75,6 +89,11 @@ def main(argv=None) -> int:
     print(f"  pooled {summary['machines_pooled']} rarely used machines into 'other'")
     print(f"  kept {summary['kept_columns']} columns -> {d} one-hot DAGMA columns "
           f"({summary['identical_indicators_merged']} identical indicators merged)")
+    if unparsed:
+        print(f"  skipped {len(unparsed)} columns whose names don't match the pattern (see columns.csv)")
+    if near:
+        print(f"  {near} pairs of indicators from different columns are near-duplicates (|correlation| >= 0.95): "
+              "DAGMA may split an effect between them, so also read the 0.1-0.2 threshold rows of the benchmark")
     if tied:
         print(f"  WARNING: {len(tied)} step numbers are shared by different steps (e.g. {next(iter(tied.items()))}); "
               "edges between them are allowed both ways, so --solver lasso cannot be used and DAGMA runs its "

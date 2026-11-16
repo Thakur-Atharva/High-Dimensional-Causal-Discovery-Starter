@@ -335,13 +335,15 @@ def main(argv=None) -> int:
         raise SystemExit(f"{args.edges} needs columns 'source' and 'target' (missing: {sorted(missing)})")
     edges = _edge_frame(edges)
     if args.min_weight > 0:
-        weak = (edges["kind"] != "identical") & ~(edges["weight"].abs() >= args.min_weight)
+        weak = (edges["kind"] != "identical") & edges["weight"].notna() & (edges["weight"].abs() < args.min_weight)
         edges = edges[~weak]
     if len(edges) > args.max_edges:
         n = len(edges)
         order = edges["weight"].abs().sort_values(ascending=False, na_position="last").index
         edges = edges.loc[order].head(args.max_edges)
         print(f"WARNING: kept {args.max_edges} of {n} edges (--max-edges {args.max_edges}), strongest |weight| first")
+    if not len(edges):
+        raise SystemExit(f"no edges to draw in {args.edges}" + (" after --min-weight" if args.min_weight > 0 else ""))
     nodes = load_nodes(edges, args.columns)
     fig = build_figure(edges, nodes)
     write_viewer(fig, nodes, edges, args.out, cdn=args.cdn)

@@ -37,7 +37,15 @@ def _load(prepared: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
 def _fit(args, rows: pd.DataFrame, kept: pd.DataFrame):
     return learn_graph(rows, kept, solver=args.solver, lambda1=args.lambda1, w_threshold=args.w_threshold,
                        time_order=not args.no_time_order, device=args.device, warm_iter=args.warm_iter,
-                       max_iter=args.max_iter)
+                       max_iter=args.max_iter, lasso_max_iter=args.lasso_max_iter)
+
+
+def _convergence_warning(fit) -> str:
+    if fit.info.get("converged") is False:
+        return (f"WARNING: the lasso solver did not converge in {fit.info['iterations']} iterations (largest "
+                f"optimality violation {fit.info['kkt_violation']:.2g}); weights near the threshold may be off. "
+                "Re-run with a larger --lasso-max-iter.")
+    return ""
 
 
 def _write_edges(out: Path, fit, kept: pd.DataFrame, threshold: float, time_order: bool) -> pd.DataFrame:
@@ -109,7 +117,8 @@ def benchmark(args) -> int:
           "machine -> presence edges, i.e. what the edges *between* steps add. `_ci95` is the half-width of a 95% "
           "interval.", "", table.to_markdown(index=False, floatfmt=".4g"), "",
           f"Fit: {fit.info['seconds']} s, {'acyclicity term skipped (time order is strict)' if fit.info['skipped_acyclicity'] else 'full DAGMA'}."
-          f" Saved graph: threshold {args.w_threshold:g} -> edges.csv; per-column gains -> per_column.csv.", ""]
+          f" Saved graph: threshold {args.w_threshold:g} -> edges.csv; per-column gains -> per_column.csv.", "",
+          _convergence_warning(fit)]
     (out / "results.md").write_text("\n".join(md))
     print("\n".join(md))
     return 0
@@ -133,6 +142,8 @@ def fit_final(args) -> int:
     (out / "info.json").write_text(json.dumps(info, indent=2, default=float))
     log.info("%d learned + %d identical edges -> %s", info["edges_learned"], info["edges_identical"],
              out / "edges.csv")
+    if _convergence_warning(fit):
+        log.warning(_convergence_warning(fit))
     return 0
 
 
@@ -152,6 +163,8 @@ def main(argv=None) -> int:
         p.add_argument("--device", default=None, help="cuda or cpu (default: cuda if available)")
         p.add_argument("--no-time-order", action="store_true",
                        help="allow edges in any direction (slow; full DAGMA; for comparison only)")
+        p.add_argument("--lasso-max-iter", type=int, default=20_000,
+                       help="--solver lasso: iteration limit (the result records whether it converged)")
         p.add_argument("--warm-iter", type=int, default=30_000, help=argparse.SUPPRESS)
         p.add_argument("--max-iter", type=int, default=60_000, help=argparse.SUPPRESS)
         if name == "benchmark":
