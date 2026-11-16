@@ -61,19 +61,23 @@ def _score_column(y_tr, y_te, r, par_tr, par_te, C):
 def heldout_logprob(train: pd.DataFrame, test: pd.DataFrame, columns: list[str], parents: dict[str, list[str]],
                     C: float = 1.0, jobs: int = -1) -> np.ndarray:
     """Log-probability of each test lot's category, per column: shape (len(test), len(columns))."""
-    needed = set(columns) | {p for c in columns for p in parents.get(c, [])}
+    return score_tasks(train, test, [(c, tuple(parents.get(c, []))) for c in columns], C, jobs)
+
+
+def score_tasks(train: pd.DataFrame, test: pd.DataFrame, tasks: list[tuple[str, tuple[str, ...]]], C: float = 1.0,
+                jobs: int = -1) -> np.ndarray:
+    """Like ``heldout_logprob`` for a list of (column, parents) pairs; each distinct pair is fitted once."""
+    unique = list(dict.fromkeys(tasks))
+    needed = {c for c, _ in unique} | {p for _, ps in unique for p in ps}
     codes = {c: _codes(train[c], test[c]) for c in needed}
-    tasks = []
-    for c in columns:
-        y_tr, y_te, r = codes[c]
-        pars = parents.get(c, [])
-        tasks.append((y_tr, y_te, r, [(codes[p][0], codes[p][2]) for p in pars],
-                      [(codes[p][1], codes[p][2]) for p in pars], C))
+    args = [(*codes[c][:3], [(codes[p][0], codes[p][2]) for p in ps], [(codes[p][1], codes[p][2]) for p in ps], C)
+            for c, ps in unique]
     if jobs == 1:
-        cols = [_score_column(*t) for t in tasks]
+        cols = [_score_column(*a) for a in args]
     else:
-        cols = Parallel(n_jobs=jobs)(delayed(_score_column)(*t) for t in tasks)
-    return np.column_stack(cols) if cols else np.zeros((len(test), 0))
+        cols = Parallel(n_jobs=jobs)(delayed(_score_column)(*a) for a in args)
+    where = {t: k for k, t in enumerate(unique)}
+    return np.column_stack([cols[where[t]] for t in tasks]) if tasks else np.zeros((len(test), 0))
 
 
 def compare(lp: np.ndarray, lp_ref: np.ndarray) -> dict:

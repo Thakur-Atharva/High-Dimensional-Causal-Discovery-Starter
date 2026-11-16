@@ -320,3 +320,68 @@ def test_unseen_parent_category_is_finite():
     tr, te = df.iloc[:400], df.iloc[400:].copy()
     te.loc[te.index[:5], "x"] = "zzz"
     assert np.isfinite(heldout_logprob(tr, te, ["y"], {"y": ["x"]}, jobs=1)).all()
+
+
+# ----- Task 8: fitting and run_dagma ------------------------------------------------------------------------------
+
+def _prepare(tmp_path, df, name="prep"):
+    from utilities.preprocess import main as preprocess_main
+    df.to_csv(tmp_path / f"{name}.csv", index=False)
+    assert preprocess_main(["--input", str(tmp_path / f"{name}.csv"), "--out", str(tmp_path / name)]) == 0
+    return tmp_path / name
+
+
+@pytest.fixture
+def prepared(tmp_path):
+    df, truth = simulate_presence(n_lots=1500, n_steps=25, n_effects=6, seed=5)
+    prep = _prepare(tmp_path, df)
+    return prep, pd.read_csv(prep / "columns.csv"), truth
+
+
+def test_benchmark_and_fit_e2e(prepared, tmp_path):
+    from utilities.run_dagma import main as run_main
+    prep, cols, truth = prepared
+    assert run_main(["benchmark", "--prepared", str(prep), "--out", str(tmp_path / "b"),
+                     "--solver", "lasso", "--device", "cpu", "--jobs", "1"]) == 0
+    res = json.loads((tmp_path / "b" / "results.json").read_text())
+    g = {r["graph"]: r for r in res["graphs"]}
+    assert set(g) == {"empty graph", "within-step only"} | {f"dagma (threshold {t})" for t in (0.1, 0.2, 0.3, 0.4, 0.5)}
+    assert g["within-step only"]["gain_vs_empty"] > 0
+    assert g["dagma (threshold 0.3)"]["gain_vs_within_step"] > 0
+    assert (tmp_path / "b" / "results.md").exists() and (tmp_path / "b" / "per_column.csv").exists()
+    assert run_main(["fit", "--prepared", str(prep), "--out", str(tmp_path / "f"),
+                     "--solver", "lasso", "--device", "cpu"]) == 0
+    edges = pd.read_csv(tmp_path / "f" / "edges.csv")
+    check_time_order(edges, cols)
+    found = {(step_of(s), step_of(t)) for s, t in zip(edges.source, edges.target)}
+    recall = np.mean([(step_of(s), step_of(t)) in found for s, t in truth.itertuples(index=False)])
+    assert recall >= 0.8
+    info = json.loads((tmp_path / "f" / "info.json").read_text())
+    A = np.load(tmp_path / "f" / "adjacency.npy")
+    assert A.shape == (len(info["columns"]),) * 2 and A.sum() == len(edges[["source", "target"]].drop_duplicates())
+
+
+def test_fit_dagma_solver_runs(prepared, tmp_path):
+    from utilities.run_dagma import main as run_main
+    prep, _, _ = prepared
+    assert run_main(["fit", "--prepared", str(prep), "--out", str(tmp_path / "d"), "--device", "cpu",
+                     "--warm-iter", "2000", "--max-iter", "4000"]) == 0
+    assert json.loads((tmp_path / "d" / "info.json").read_text())["skipped_acyclicity"] is True
+
+
+def test_lasso_with_tied_steps_exits(tmp_path):
+    from utilities.run_dagma import main as run_main
+    df, _ = simulate_presence(n_lots=600, n_steps=10, rare_steps=0, seed=6)
+    df = df.rename(columns={c: "2" + c[1:] for c in df.columns if c.startswith("3_")})   # steps 2 and 3 share N=2
+    prep = _prepare(tmp_path, df)
+    with pytest.raises(SystemExit, match="share a step number"):
+        run_main(["fit", "--prepared", str(prep), "--out", str(tmp_path / "x"), "--solver", "lasso", "--device", "cpu"])
+
+
+def test_gpu_memory_check(monkeypatch):                 # Review Focus 5
+    from utilities.fitting import check_gpu_memory
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "mem_get_info", lambda *a: (2 * 1024**3, 24 * 1024**3))
+    with pytest.raises(SystemExit, match="--min-lots"):
+        check_gpu_memory(20_000, "dagma", "cuda")
+    check_gpu_memory(100, "dagma", "cuda")             # fits: no error
