@@ -146,14 +146,18 @@ The viewer also works on `edges.csv` from `python -m causal_discovery run`.
   - Presence level 1 usually equals "not absent", so it merges into that indicator.
 - **Presence columns drop level `0`.**
 
-`d`, the number of DAGMA columns, is the number of indicators. Expect about 5–6 per kept step.
+`d`, the number of DAGMA columns, is the number of indicators. Expect about 6–7 per kept step with ~4 machines per
+step: 5,000 simulated steps gave d = 33,745.
 
 **Identical indicators are merged.** When two indicators are equal, or exact opposites, on the lots being fitted, only
 the earliest one in time is kept. Otherwise DAGMA's L1 penalty splits an effect's weight between the copies, and both
 halves can fall below the 0.3 cut-off: a 0.49 edge became 0.24 + 0.24 in a test.
 
 *Near*-duplicates, such as columns that differ on a handful of lots, are not merged, so they can still share a weight.
-If an edge you expect is missing, check whether its column has a near-twin.
+In routing data this is common: many steps are visited by almost the same lots. `preprocess` counts the
+near-duplicate indicator pairs across steps (|correlation| ≥ 0.95). If the count is large:
+- read the 0.1 and 0.2 threshold rows of the benchmark as well as 0.3;
+- if an edge you expect is missing, check whether its column has a near-twin.
 
 **Time-order mask.** An indicator may only have parents from earlier steps. Within a step, the machine may be a
 parent of the presence, not the reverse. Edges between two different steps that share a step number are allowed both
@@ -178,7 +182,29 @@ ways.
 
 ## 6. Runtime and memory (measured)
 
-{{MEASURED}}
+Simulated table at your size (`benchmarks/stx_scale.sh`): 9,000 lots × 5,000 steps (10,000 columns), 1–11 machines
+per step (mean ~4), giving **d = 33,745**. Measured on an NVIDIA RTX PRO 6000 Max-Q (96 GB). An RTX 4090 ran the same
+speed per iteration at d = 10,093.
+
+| Step | Time | Memory |
+|---|---|---|
+| `preprocess` | 3 min | 7 GB RAM |
+| `run_dagma benchmark --solver lasso` (fit: 300 iterations, 9 min; scoring 7 graphs: 26 s) | 16.5 min | 41 GB RAM, 37.6 GB GPU |
+| `run_dagma fit --solver lasso` (400 iterations) | 13 min | 40 GB RAM, 37.6 GB GPU |
+| `plot_edges` (5,145 edges) | seconds | 10 MB HTML |
+| `--solver dagma`, per iteration | 1.89 s (~25,500 iterations ≈ **13 hours per fit**, extrapolated) | 36.5 GB GPU |
+| DAGMA's full path (only when steps share a number), per iteration | 4.66 s | 77 GB GPU |
+
+**Do the two solvers agree?** At d = 10,093 (1,500 steps), full fits with `--solver dagma` (28 min) and
+`--solver lasso` (15 s) gave **exactly the same edges**: 1,514 indicator-level, 1,482 column-level, and none found by
+only one. The weights differed by at most 0.0045.
+
+**Did it find the right edges?** On the full-size simulation, the final graph recovered **all 200 planted
+machine → later-step effects**. Of the 202 cross-step step pairs it found, 200 are planted. The simulation draws steps
+independently. Real routing data, where many steps are visited by nearly the same lots, will be harder (see the
+near-duplicate note in section 5).
+
+**Host memory** grows with d²: about 40 GB of RAM at d ≈ 34,000 (the d × d covariance and weight matrices in float64).
 
 **Scaling:** both solvers do one d × d matrix product per iteration, so time grows with d³. Doubling `d` makes a fit
 about 8× slower and needs 4× the memory. `preprocess` prints an estimate for your `d`.
@@ -190,7 +216,9 @@ about 8× slower and needs 4× the memory. `preprocess` prints an estimate for y
 | `column name(s) don't match ...` | rename those columns, or pass `--ignore-unparsed` to skip them |
 | `presence column(s) have values other than 0, 1 or 2` | fix or drop those cells; the message lists examples |
 | `Some different steps share a step number` | use `--solver dagma` (slower: it falls back to full DAGMA), or give the steps distinct numbers |
-| `needs about X GB of GPU memory ... only Y GB is free` | re-run `preprocess` with `--min-lots 200`, or use a larger GPU |
+| `needs about X GB of GPU memory ... only Y GB is free` | re-run `preprocess` with `--min-lots 200`, or use a larger GPU. Check `nvidia-smi` too: on a shared node another process may already hold most of "your" GPU |
+| `No GPU is visible to PyTorch` | check `nvidia-smi` and that torch was installed with CUDA; `--device cpu` forces a (very slow) CPU run |
+| `WARNING: the lasso solver did not converge` | re-run with a larger `--lasso-max-iter` (default 20,000; 300–400 were needed at full size) |
 | a fit is too slow | use `--solver lasso`; raise `--min-lots` |
 
 ## 8. Dry run without the real data

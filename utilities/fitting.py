@@ -27,13 +27,13 @@ class FitResult:
     info: dict
 
 
-def check_gpu_memory(d: int, solver: str, device) -> None:
+def check_gpu_memory(d: int, solver: str, device, acyclic: bool = True) -> None:
     """Stop before fitting if the estimated memory for d indicators exceeds what is free on the GPU."""
     device = torch.device(device) if device is not None else default_device()
     if device.type != "cuda" or not torch.cuda.is_available():
         return
     free, _ = torch.cuda.mem_get_info(device)
-    need = estimate_gpu_gb(d, solver) * 1e9
+    need = estimate_gpu_gb(d, solver, acyclic) * 1e9
     if need > free:
         raise SystemExit(
             f"--solver {solver} needs about {need / 1e9:.1f} GB of GPU memory for {d} DAGMA columns, but only "
@@ -95,7 +95,7 @@ def learn_graph(df: pd.DataFrame, columns: pd.DataFrame, *, solver: str = "dagma
                          "columns on the CPU would take very long. Check nvidia-smi and that your torch build has "
                          "CUDA, or pass --device cpu to run on the CPU anyway.")
     log.info("fitting on %s", device)
-    check_gpu_memory(d, solver, device)
+    check_gpu_memory(d, solver, device, acyclic)
     on_gpu = device.type == "cuda" and torch.cuda.is_available()
     if on_gpu:
         torch.cuda.reset_peak_memory_stats(device)

@@ -251,8 +251,10 @@ def test_check_time_order():
 
 
 def test_estimate_gpu_gb():
-    assert estimate_gpu_gb(10_000, "dagma") == pytest.approx(4.8)
-    assert estimate_gpu_gb(10_000, "lasso") == pytest.approx(3.2)
+    # measured peaks, in d x d float32 matrices: lasso 8.25, DAGMA skip path 8.0, DAGMA full path 17.0 (+ ~10%)
+    assert estimate_gpu_gb(10_000, "lasso") == pytest.approx(3.6)
+    assert estimate_gpu_gb(10_000, "dagma") == pytest.approx(3.6)
+    assert estimate_gpu_gb(10_000, "dagma", acyclic=False) == pytest.approx(7.2)
 
 
 # ----- Task 6: preprocessing CLI -----------------------------------------------------------------------------------
@@ -268,7 +270,7 @@ def test_preprocess_cli(tmp_path):
     assert s["steps_dropped_rare"] == 3 and (cols.drop_reason == "rare_step").sum() == 6
     kept = cols[cols.kept].assign(k=cols.kind.eq("presence"))
     assert list(data.columns[1:]) == kept.sort_values(["step_number", "step_key", "k"]).name.tolist()
-    assert s["encoded_columns"] > 0 and s["gpu_gb_dagma"] > s["gpu_gb_lasso"] and s["runtime_note"]
+    assert s["encoded_columns"] > 0 and s["gpu_gb_dagma"] >= s["gpu_gb_lasso"] > 0 and "min per fit" in s["runtime_note"]
     assert data["lot_id"].tolist() == df["lot_id"].tolist()
     assert preprocess_main(["--input", str(tmp_path / "p.csv"), "--out", str(tmp_path / "prep2"),
                             "--min-lots", "200"]) == 0

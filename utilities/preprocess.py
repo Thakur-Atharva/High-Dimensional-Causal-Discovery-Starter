@@ -23,19 +23,21 @@ from .presence import filter_and_pool, find_tied_steps, load_presence_matrix, pa
 
 log = logging.getLogger(__name__)
 
-# Seconds per iteration measured at REF_D indicators (float32 GPU) and typical iteration counts. Each iteration is a
-# d x d matrix product for both solvers, so time scales with (d / REF_D)^3. Placeholders until the full-size run.
-REF_D = 10_000
-REF_SEC_PER_ITER = {"dagma": 0.035, "lasso": 0.035}
-TYPICAL_ITERS = {"dagma": 88_000, "lasso": 2_000}
-REF_GPU = "RTX 4090-class GPU (estimate)"
+# Measured (benchmarks/stx_scale.sh): seconds per iteration at REF_D indicators on an RTX PRO 6000 Max-Q, which ran
+# the same per-iteration speed as an RTX 4090 at d = 10,093. Each iteration is a d x d matrix product for both
+# solvers, so time scales with (d / REF_D)^3. Iterations to converge: lasso 300-400 at REF_D; DAGMA's optimizer
+# ~25,500 at d = 10,093 (not run to the end at REF_D: about 13 hours).
+REF_D = 33_745
+REF_SEC_PER_ITER = {"dagma": 1.89, "lasso": 1.71}
+TYPICAL_ITERS = {"dagma": 25_500, "lasso": 400}
+REF_GPU = "RTX 4090 / RTX PRO 6000-class GPU"
 
 
 def runtime_note(d: int) -> str:
     parts = []
     for solver in ("dagma", "lasso"):
         minutes = REF_SEC_PER_ITER[solver] * TYPICAL_ITERS[solver] * (d / REF_D) ** 3 / 60
-        parts.append(f"--solver {solver}: ~{minutes:,.0f} min per fit")
+        parts.append(f"--solver {solver}: " + ("<1 min" if minutes < 1 else f"~{minutes:,.0f} min") + " per fit")
     return f"{'; '.join(parts)} on an {REF_GPU}; time grows with d^3"
 
 
@@ -74,7 +76,7 @@ def main(argv=None) -> int:
                     "columns_unparsed": len(unparsed),
                     "encoded_columns": d, "identical_indicators_merged": int(sum(map(len, enc.aliases.values()))),
                     "near_duplicate_indicator_pairs": near,
-                    "gpu_gb_dagma": float(f"{estimate_gpu_gb(d, 'dagma'):.3g}"),
+                    "gpu_gb_dagma": float(f"{estimate_gpu_gb(d, 'dagma', acyclic=not tied):.3g}"),
                     "gpu_gb_lasso": float(f"{estimate_gpu_gb(d, 'lasso'):.3g}"),
                     "runtime_note": runtime_note(d)})
     out = Path(args.out)

@@ -167,6 +167,13 @@ def check_time_order(edges: pd.DataFrame, columns: pd.DataFrame) -> None:
         raise ValueError(f"{len(bad)} edge(s) violate the time order: {bad[:10]}")
 
 
-def estimate_gpu_gb(d: int, solver: str) -> float:
-    """Rough GPU memory for a fit on d indicators in float32: about 12 (DAGMA) or 8 (lasso) d x d matrices."""
-    return {"dagma": 12, "lasso": 8}[solver] * d * d * 4 / 1e9
+def estimate_gpu_gb(d: int, solver: str, acyclic: bool = True) -> float:
+    """GPU memory for a fit on d indicators in float32, in d x d matrices with ~10% headroom over measured peaks.
+
+    Measured at d = 10,093 and 33,745: lasso 8.25, DAGMA with the acyclicity term skipped 8.0, DAGMA's full path
+    (needed when the mask has cycles, e.g. steps sharing a number) 17.0.
+    """
+    matrices = 9 if (solver == "lasso" or acyclic) else 18
+    if solver not in ("lasso", "dagma"):
+        raise ValueError("solver must be 'dagma' or 'lasso'")
+    return matrices * d * d * 4 / 1e9
