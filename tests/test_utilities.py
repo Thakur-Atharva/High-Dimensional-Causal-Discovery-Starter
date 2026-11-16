@@ -270,3 +270,50 @@ def test_preprocess_cli(tmp_path):
     assert preprocess_main(["--input", str(tmp_path / "p.csv"), "--out", str(tmp_path / "prep2"),
                             "--min-lots", "200"]) == 0
     assert json.loads((tmp_path / "prep2" / "summary.json").read_text())["kept_columns"] <= s["kept_columns"]
+
+
+# ----- Task 7: held-out scoring ------------------------------------------------------------------------------------
+
+def test_frequency_model_exact():
+    from utilities.scoring import heldout_logprob
+    tr = pd.DataFrame({"a": ["x", "x", "y"]})
+    te = pd.DataFrame({"a": ["x", "z"]})
+    lp = heldout_logprob(tr, te, ["a"], {}, jobs=1)
+    np.testing.assert_allclose(lp[:, 0], np.log([3 / 5, 1 / 6]))
+
+
+def _xy(n, noise, seed):
+    rng = np.random.default_rng(seed)
+    x = rng.choice(list("abcd"), n)
+    y = np.where(rng.random(n) < noise, rng.choice(list("abcd"), n), x)
+    return pd.DataFrame({"x": x, "y": y})
+
+
+def test_parent_improves_heldout():
+    from utilities.scoring import compare, heldout_logprob
+    df = _xy(2000, 0.05, 0)
+    tr, te = df.iloc[:1600], df.iloc[1600:]
+    lp0 = heldout_logprob(tr, te, ["x", "y"], {}, jobs=1)
+    lp1 = heldout_logprob(tr, te, ["x", "y"], {"y": ["x"]}, jobs=1)
+    c = compare(lp1, lp0)
+    assert c["gain"] > 0.3 and c["gain"] - c["ci95"] > 0
+
+
+def test_many_parents_still_gain():          # a probability-table model scores below the empty graph here
+    from utilities.scoring import compare, heldout_logprob
+    rng = np.random.default_rng(1)
+    n = 3750
+    df = pd.DataFrame({f"p{i}": rng.choice(list("vwxyz"), n) for i in range(12)})
+    df["y"] = np.where(rng.random(n) < 0.8, df["p0"], rng.choice(list("vwxyz"), n))
+    tr, te = df.iloc[:3000], df.iloc[3000:]
+    c = compare(heldout_logprob(tr, te, ["y"], {"y": [f"p{i}" for i in range(12)]}, jobs=1),
+                heldout_logprob(tr, te, ["y"], {}, jobs=1))
+    assert c["gain"] > 0
+
+
+def test_unseen_parent_category_is_finite():
+    from utilities.scoring import heldout_logprob
+    df = _xy(500, 0.1, 2)
+    tr, te = df.iloc[:400], df.iloc[400:].copy()
+    te.loc[te.index[:5], "x"] = "zzz"
+    assert np.isfinite(heldout_logprob(tr, te, ["y"], {"y": ["x"]}, jobs=1)).all()
