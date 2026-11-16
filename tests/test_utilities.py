@@ -385,3 +385,93 @@ def test_gpu_memory_check(monkeypatch):                 # Review Focus 5
     with pytest.raises(SystemExit, match="--min-lots"):
         check_gpu_memory(20_000, "dagma", "cuda")
     check_gpu_memory(100, "dagma", "cuda")             # fits: no error
+
+
+# ----- Task 9: interactive viewer -----------------------------------------------------------------------------------
+
+@pytest.fixture
+def edges_and_columns(prepared, tmp_path):
+    from utilities.run_dagma import main as run_main
+    prep, _, _ = prepared
+    assert run_main(["fit", "--prepared", str(prep), "--out", str(tmp_path / "f"), "--solver", "lasso",
+                     "--device", "cpu"]) == 0
+    return str(tmp_path / "f" / "edges.csv"), str(prep / "columns.csv")
+
+
+def _node_count(fig):
+    return sum(len(t.x) for t in fig.data if t.meta == "nodes")
+
+
+def test_viewer_pipeline_edges(tmp_path, edges_and_columns):
+    from utilities.plot_edges import main as plot_main
+    e_path, c_path = edges_and_columns
+    out = tmp_path / "g.html"
+    assert plot_main(["--edges", e_path, "--columns", c_path, "--out", str(out)]) == 0
+    html = out.read_text()
+    assert "stxHighlight" in html and 'id="stx-search"' in html
+    assert pd.read_csv(e_path).source.iloc[0] in html
+
+
+def test_viewer_package_edges(tmp_path):                       # Review Focus 4
+    from utilities.plot_edges import build_figure, load_nodes
+    pd.DataFrame({"source": ["X1", "X2"], "target": ["X2", "X3"]}).to_csv(tmp_path / "e.csv", index=False)
+    edges = pd.read_csv(tmp_path / "e.csv")
+    nodes = load_nodes(edges, None)
+    assert set(nodes.name) == {"X1", "X2", "X3"} and nodes.step_number.isna().all()
+    assert _node_count(build_figure(edges, nodes)) == 3
+
+
+def test_viewer_max_edges_and_isolated(tmp_path, capsys, edges_and_columns):
+    from utilities.plot_edges import load_nodes, main as plot_main
+    _, c_path = edges_and_columns
+    cols = pd.read_csv(c_path)
+    names = cols[cols.kept].name.tolist()
+    rng = np.random.default_rng(0)
+    pairs = [(a, b) for a in names for b in names if step_of(a) < step_of(b)]
+    pick = rng.choice(len(pairs), 100, replace=False)
+    e100 = pd.DataFrame({"source": [pairs[k][0] for k in pick], "target": [pairs[k][1] for k in pick],
+                         "weight": rng.uniform(-1, 1, 100)})
+    e100.to_csv(tmp_path / "e100.csv", index=False)
+    assert plot_main(["--edges", str(tmp_path / "e100.csv"), "--columns", c_path, "--max-edges", "10",
+                      "--out", str(tmp_path / "m.html")]) == 0
+    assert "kept 10 of 100" in capsys.readouterr().out
+    top10 = e100.reindex(e100.weight.abs().sort_values(ascending=False).index).head(10)
+    nodes = load_nodes(top10, c_path)
+    assert (nodes.in_degree + nodes.out_degree).gt(0).all() and len(nodes) < len(names)
+
+
+def test_viewer_js_parses(tmp_path, edges_and_columns):
+    import re
+    import shutil
+    import subprocess
+    from utilities.plot_edges import main as plot_main
+    e_path, c_path = edges_and_columns
+    plot_main(["--edges", e_path, "--columns", c_path, "--out", str(tmp_path / "j.html"), "--cdn"])
+    html = (tmp_path / "j.html").read_text()
+    js = re.findall(r"<script[^>]*>(.*?)</script>", html, re.S)[-1]   # the plot call with the injected script
+    if shutil.which("node") is None:
+        pytest.skip("node not installed")
+    (tmp_path / "s.js").write_text(js)
+    subprocess.run(["node", "--check", str(tmp_path / "s.js")], check=True)
+
+
+def test_viewer_node_ids_are_plain_json():
+    # the page's click/highlight script reads node ids from the figure's JSON; plotly encodes numpy arrays as base64
+    from utilities.plot_edges import build_figure, load_nodes
+    edges = pd.DataFrame({"source": ["1_S:a::mach", "1_S:a"], "target": ["1_S:a", "2_S:b"]})
+    fig = build_figure(edges, load_nodes(edges, None))
+    data = json.loads(fig.to_json())["data"]
+    ids = [i for t in data if t.get("meta") == "nodes" for i in t["customdata"]]
+    assert sorted(ids) == [0, 1, 2]
+
+
+def test_viewer_range_fits_arcs_and_labels_stages():
+    from utilities.plot_edges import build_figure, load_nodes
+    edges = pd.DataFrame({"source": ["1_A:x::mach", "1_A:x::mach", "2_A:y", "3_B:z::mach"],
+                          "target": ["1_A:x", "30_C:w", "40_C:v", "3_B:z"]})
+    fig = build_figure(edges, load_nodes(edges, None))
+    lo, hi = fig.layout.yaxis.range
+    arc_y = [v for t in fig.data if t.meta == "edges" for v in t.y if v is not None]
+    assert lo <= min(arc_y) and hi >= max(arc_y) and hi < 2.75      # fitted, not the old fixed range
+    stages = [t for t in fig.data if t.meta == "stages"][0]
+    assert list(stages.text) == ["A", "B", "C"]
