@@ -485,3 +485,12 @@ def test_viewer_range_fits_arcs_and_labels_stages():
     assert lo <= min(arc_y) and hi >= max(arc_y) and hi < 2.75      # fitted, not the old fixed range
     stages = [t for t in fig.data if t.meta == "stages"][0]
     assert list(stages.text) == ["A", "B", "C"]
+
+
+# ----- final-review fixes ------------------------------------------------------------------------------------------
+
+def test_covariance_blocked_matches_direct():
+    # X.T @ X (BLAS syrk) segfaulted at d >= ~32,700 on the Slurm node; the blocked product must give the same matrix
+    from utilities.fitting import covariance
+    X = np.random.default_rng(0).normal(size=(50, 23))
+    np.testing.assert_allclose(covariance(X, block=7), X.T @ X / 50, rtol=1e-12, atol=1e-12)

@@ -46,9 +46,24 @@ def prepare_problem(df: pd.DataFrame, columns: pd.DataFrame,
     X = indicator_matrix(df, enc)
     X -= X.mean(axis=0)
     X /= X.std(axis=0)
-    cov = X.T @ X / X.shape[0]
+    cov = covariance(X)
     del X
     return enc, cov, build_mask(enc, time_order)
+
+
+def covariance(X: np.ndarray, block: int = 4096) -> np.ndarray:
+    """X^T X / n, computed in column blocks into one preallocated array.
+
+    The direct ``X.T @ X`` (a BLAS syrk call) crashed with a segmentation fault at d >= ~32,700 with OpenBLAS 0.3.34,
+    and it also needs a second d x d temporary for the division.
+    """
+    n, d = X.shape
+    cov = np.empty((d, d), dtype=np.float64)
+    for a in range(0, d, block):
+        b = min(a + block, d)
+        np.matmul(X[:, a:b].T, X, out=cov[a:b])
+    cov /= n
+    return cov
 
 
 def learn_graph(df: pd.DataFrame, columns: pd.DataFrame, *, solver: str = "dagma", lambda1: float = 0.03,
