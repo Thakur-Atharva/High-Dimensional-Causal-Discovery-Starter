@@ -556,9 +556,10 @@ def test_preprocess_reports_near_duplicates(tmp_path):
     df, _ = simulate_presence(n_lots=2000, n_steps=12, rare_steps=0, seed=8)
     a, b = df.columns[7], df.columns[9]                     # presence columns of steps 4 and 5
     rng = np.random.default_rng(0)
-    flip = rng.random(len(df)) < 0.01                       # step 5 visited by the same lots as step 4, 1% differ
-    df[b] = np.where(flip, 1 - (df[a] > 0), (df[a] > 0)).astype(np.int8)
-    df[b + "::mach"] = np.where(df[b] > 0, "M5", "")
+    va = rng.random(len(df)) < 0.5                          # step 4: half the lots
+    df[a], df[a + "::mach"] = va.astype(np.int8), np.where(va, rng.choice(["M4a", "M4b"], len(df)), "")
+    vb = np.where(rng.random(len(df)) < 0.01, ~va, va)      # step 5: the same lots, 1% differ (corr ~0.98)
+    df[b], df[b + "::mach"] = vb.astype(np.int8), np.where(vb, "M5", "")
     df.to_csv(tmp_path / "n.csv", index=False)
     assert preprocess_main(["--input", str(tmp_path / "n.csv"), "--out", str(tmp_path / "p")]) == 0
     assert json.loads((tmp_path / "p" / "summary.json").read_text())["near_duplicate_indicator_pairs"] >= 1
