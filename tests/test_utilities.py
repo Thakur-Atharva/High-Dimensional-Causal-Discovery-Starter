@@ -1,4 +1,5 @@
 """Checks for utilities/ (the step-presence pipeline): CPU, about a minute."""
+import json
 import logging
 
 import numpy as np
@@ -249,3 +250,23 @@ def test_check_time_order():
 def test_estimate_gpu_gb():
     assert estimate_gpu_gb(10_000, "dagma") == pytest.approx(4.8)
     assert estimate_gpu_gb(10_000, "lasso") == pytest.approx(3.2)
+
+
+# ----- Task 6: preprocessing CLI -----------------------------------------------------------------------------------
+
+def test_preprocess_cli(tmp_path):
+    from utilities.preprocess import main as preprocess_main
+    df, _ = simulate_presence(n_lots=800, n_steps=30, rare_steps=3, seed=4)
+    df.to_csv(tmp_path / "p.csv", index=False)
+    assert preprocess_main(["--input", str(tmp_path / "p.csv"), "--out", str(tmp_path / "prep")]) == 0
+    s = json.loads((tmp_path / "prep" / "summary.json").read_text())
+    cols = pd.read_csv(tmp_path / "prep" / "columns.csv")
+    data = pd.read_parquet(tmp_path / "prep" / "data.parquet")
+    assert s["steps_dropped_rare"] == 3 and (cols.drop_reason == "rare_step").sum() == 6
+    kept = cols[cols.kept].assign(k=cols.kind.eq("presence"))
+    assert list(data.columns[1:]) == kept.sort_values(["step_number", "step_key", "k"]).name.tolist()
+    assert s["encoded_columns"] > 0 and s["gpu_gb_dagma"] > s["gpu_gb_lasso"] and s["runtime_note"]
+    assert data["lot_id"].tolist() == df["lot_id"].tolist()
+    assert preprocess_main(["--input", str(tmp_path / "p.csv"), "--out", str(tmp_path / "prep2"),
+                            "--min-lots", "200"]) == 0
+    assert json.loads((tmp_path / "prep2" / "summary.json").read_text())["kept_columns"] <= s["kept_columns"]
