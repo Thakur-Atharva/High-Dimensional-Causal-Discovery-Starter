@@ -38,7 +38,8 @@ def check_gpu_memory(d: int, solver: str, device) -> None:
         raise SystemExit(
             f"--solver {solver} needs about {need / 1e9:.1f} GB of GPU memory for {d} DAGMA columns, but only "
             f"{free / 1e9:.1f} GB is free on {device}. Re-run utilities.preprocess with a larger --min-lots (e.g. 200) "
-            f"to drop more steps, use --solver lasso (less memory), or use a GPU with more memory.")
+            f"to drop more steps, {'use --solver lasso (less memory), ' if solver == 'dagma' else ''}or use a GPU "
+            "with more free memory (check nvidia-smi for other processes on it).")
 
 
 def prepare_problem(df: pd.DataFrame, columns: pd.DataFrame,

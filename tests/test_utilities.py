@@ -395,6 +395,9 @@ def test_gpu_memory_check(monkeypatch):                 # Review Focus 5
     with pytest.raises(SystemExit, match="--min-lots"):
         check_gpu_memory(20_000, "dagma", "cuda")
     check_gpu_memory(100, "dagma", "cuda")             # fits: no error
+    with pytest.raises(SystemExit) as stop:
+        check_gpu_memory(20_000, "lasso", "cuda")
+    assert "use --solver lasso" not in str(stop.value)  # already the low-memory solver
 
 
 # ----- Task 9: interactive viewer -----------------------------------------------------------------------------------
