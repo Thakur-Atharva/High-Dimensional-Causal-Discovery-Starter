@@ -59,3 +59,42 @@ def test_masked_dagma_cyclic_mask():
     assert not m.skipped_acyclicity                  # "auto" falls back to the full path
     with pytest.raises(ValueError):
         DagmaLinear(device="cpu", dtype=torch.float64).fit(cov=cov, mask=full, skip_acyclicity=True)
+
+
+def test_masked_lasso_matches_dagma():
+    from causal_discovery.masked_lasso import MaskedLasso
+    cov, mask, _ = ordered_problem()
+    dag = DagmaLinear(device="cpu", dtype=torch.float64)
+    dag.fit(cov=cov, mask=mask)
+    las = MaskedLasso(device="cpu", dtype=torch.float64)
+    las.fit(cov, mask)
+    assert las.converged
+    assert ((dag.W_est != 0) == (las.W_est != 0)).all()
+    # DAGMA's fixed-size Adam steps and its relative-change stopping rule leave it ~1e-3 from the exact minimiser
+    np.testing.assert_allclose(las.W_raw, dag.W_raw, atol=5e-3)
+
+    def objective(W):
+        D = np.eye(len(W)) - W
+        return 0.5 * np.trace(D.T @ cov @ D) + 0.03 * np.abs(W).sum()
+    assert objective(las.W_raw) <= objective(dag.W_raw) + 1e-9
+
+
+def test_masked_lasso_kkt():
+    from causal_discovery.masked_lasso import MaskedLasso
+    cov, mask, _ = ordered_problem(seed=3)
+    las = MaskedLasso(device="cpu", dtype=torch.float64)
+    las.fit(cov, mask, lambda1=0.03)
+    W = las.W_raw
+    G = cov @ W - cov
+    tol = 1e-3
+    act = mask & (W != 0)
+    ina = mask & (W == 0)
+    assert np.abs(G[act] + 0.03 * np.sign(W[act])).max() < tol
+    assert np.abs(G[ina]).max() < 0.03 + tol and not W[~mask].any()
+
+
+def test_masked_lasso_rejects_cyclic_mask():
+    from causal_discovery.masked_lasso import MaskedLasso
+    cov, _, _ = ordered_problem()
+    with pytest.raises(ValueError):
+        MaskedLasso(device="cpu").fit(cov, ~np.eye(12, dtype=bool))
