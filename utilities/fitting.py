@@ -119,13 +119,14 @@ def learn_graph(df: pd.DataFrame, columns: pd.DataFrame, *, solver: str = "dagma
     return FitResult(model.W_raw, enc, info)
 
 
-def count_near_duplicates(X: np.ndarray, columns: list[str], threshold: float = 0.95, block: int = 4096) -> int:
-    """Pairs of indicators from different columns with |correlation| >= threshold (X standardized, columns of X).
+def count_near_duplicates(X: np.ndarray, steps: list[str], threshold: float = 0.95, block: int = 4096) -> int:
+    """Pairs of indicators from different steps with |correlation| >= threshold (X standardized; ``steps`` gives each
+    indicator's step key). Pairs within a step (e.g. "visited once" vs "not absent") are expected and not counted.
 
     DAGMA's L1 penalty splits an effect's weight across such near-copies, so each can fall below the edge cut-off.
     """
     n, d = X.shape
-    col = pd.factorize(pd.Series(columns))[0]
+    col = pd.factorize(pd.Series(steps))[0]
     total = 0
     for a in range(0, d, block):
         b = min(a + block, d)

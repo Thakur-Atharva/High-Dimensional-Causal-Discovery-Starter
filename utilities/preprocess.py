@@ -66,7 +66,7 @@ def main(argv=None) -> int:
     X = indicator_matrix(kept, enc)
     X -= X.mean(axis=0)
     X /= X.std(axis=0)
-    near = count_near_duplicates(X, enc.column)
+    near = count_near_duplicates(X, enc.step_key)
     del X
     summary.update({"min_lots": args.min_lots,
                     "min_machine_lots": args.min_machine_lots if args.min_machine_lots is not None else args.min_lots,
@@ -92,7 +92,7 @@ def main(argv=None) -> int:
     if unparsed:
         print(f"  skipped {len(unparsed)} columns whose names don't match the pattern (see columns.csv)")
     if near:
-        print(f"  {near} pairs of indicators from different columns are near-duplicates (|correlation| >= 0.95): "
+        print(f"  {near} pairs of indicators from different steps are near-duplicates (|correlation| >= 0.95): "
               "DAGMA may split an effect between them, so also read the 0.1-0.2 threshold rows of the benchmark")
     if tied:
         print(f"  WARNING: {len(tied)} step numbers are shared by different steps (e.g. {next(iter(tied.items()))}); "

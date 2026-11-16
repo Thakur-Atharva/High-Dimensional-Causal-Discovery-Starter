@@ -562,3 +562,12 @@ def test_preprocess_reports_near_duplicates(tmp_path):
     df.to_csv(tmp_path / "n.csv", index=False)
     assert preprocess_main(["--input", str(tmp_path / "n.csv"), "--out", str(tmp_path / "p")]) == 0
     assert json.loads((tmp_path / "p" / "summary.json").read_text())["near_duplicate_indicator_pairs"] >= 1
+
+
+def test_near_duplicates_ignore_same_step_pairs(tmp_path):
+    # with few revisits, "visited once" ~ "not absent" within a step: expected, not a cross-step near-duplicate
+    from utilities.preprocess import main as preprocess_main
+    df, _ = simulate_presence(n_lots=2000, n_steps=12, rare_steps=0, seed=8)
+    df.to_csv(tmp_path / "s.csv", index=False)
+    assert preprocess_main(["--input", str(tmp_path / "s.csv"), "--out", str(tmp_path / "p")]) == 0
+    assert json.loads((tmp_path / "p" / "summary.json").read_text())["near_duplicate_indicator_pairs"] == 0
