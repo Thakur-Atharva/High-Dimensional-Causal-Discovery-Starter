@@ -172,10 +172,15 @@ python -m utilities.preprocess --input presence_matrix.csv --out prepared/ \
 
 ### 5.3 Encoding and mask (`utilities.presence`)
 
-- **One-hot, dropping one reference level per column:**
-  - machine columns drop `absent`, so the indicators read "lot ran on machine M";
-  - presence columns drop `0`, so the indicators read "visited once" and "visited twice".
-  - If the reference level doesn't occur, drop the most common level.
+- **One-hot encoding:**
+  - **Machine columns keep every level, with `absent` first** (implementation ruling; this replaces the original
+    "drop `absent`"). The `absent` indicator then carries "visited this step?" on its own, and presence level 1 usually
+    merges into it. Each machine keeps its own indicator.
+    - Dropping `absent` instead spreads an effect on *visiting* a step across all of that step's machine indicators.
+      On the simulated data that recovered only 45–62% of planted effects, against 100% with every level kept, for
+      about 11% more columns.
+  - Presence columns drop `0`, so the indicators read "visited once" and "visited twice". If `0` doesn't occur, they
+    drop the most common level.
   - Categories are taken from the training rows; indicators that are constant on the training rows are dropped.
 - **Merge identical indicators.** This is Claude's call; the user can override it. Two indicators are identical if they
   are equal or exact complements on the rows being fitted, i.e. |correlation| = 1.

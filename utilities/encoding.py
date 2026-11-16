@@ -1,7 +1,7 @@
 """From categorical step columns to DAGMA's input and back.
 
-* One-hot encoding: one 0/1 indicator per category, dropping a reference level per column (``absent`` for machine
-  columns, ``0`` for presence columns, otherwise the most common level).
+* One-hot encoding: one 0/1 indicator per category. Machine columns keep every level, ``absent`` first; presence
+  columns drop ``0`` (or, if 0 never occurs, their most common level).
 * Identical indicators (equal, or exact complements, on the rows being fitted) are merged into the earliest one in
   time. Otherwise the L1 penalty splits an effect's weight between the copies, and both halves can fall below the
   edge threshold.
@@ -55,8 +55,15 @@ def fit_encoding(df: pd.DataFrame, columns: pd.DataFrame) -> Encoding:
     levels: dict[str, list[str]] = {}
     for row in _kept(columns).itertuples(index=False):
         s = df[row.name].astype(str)
-        ref = _reference(s, row.kind)
-        levels[row.name] = [c for c in sorted(s.unique()) if c != ref]
+        cats = sorted(s.unique())
+        if row.kind == "machine":
+            # Every level, "absent" first: "absent" then carries "visited this step?" in one indicator (the presence
+            # level 1 usually merges into it), and every machine keeps its own. Dropping "absent" instead spreads an
+            # effect on visiting over all of the step's machine indicators, which in simulations hid half the edges.
+            levels[row.name] = sorted(cats, key=lambda c: (c != ABSENT, c))
+        else:
+            ref = _reference(s, row.kind)
+            levels[row.name] = [c for c in cats if c != ref]
         for c in levels[row.name]:
             v = (s == c).to_numpy()
             if v.any() and not v.all():

@@ -145,7 +145,7 @@ def _step(df, num, key, visited, machines=None, rng=None, revisit=None):
 def _mask_frame(with_tie=True, n=400, seed=0):
     rng = np.random.default_rng(seed)
     df = pd.DataFrame({"lot_id": [f"L{i}" for i in range(n)]})
-    _step(df, 1, "S:a", rng.random(n) < 0.6, ["A", "B"], rng)
+    _step(df, 1, "S:a", rng.random(n) < 0.6, ["A", "B"], rng, revisit=rng.random(n) < 0.3)
     _step(df, 2, "S:b", rng.random(n) < 0.5, ["C", "D"], rng)
     if with_tie:
         _step(df, 2, "T:x", rng.random(n) < 0.5)
@@ -159,8 +159,8 @@ def test_reference_levels():
     df["1_S:a"] = np.where(lots < 20, 0, np.where(lots < 90, 1, 2)).astype(np.int8)
     df["2_S:b::mach"] = np.where((lots >= 50) & (lots < 90), "D", "C")
     enc = fit_encoding(df, _table(df))
-    assert set(enc.levels["1_S:a::mach"]) == {"A", "B"} and set(enc.levels["1_S:a"]) == {"1", "2"}
-    assert enc.levels["2_S:b::mach"] == ["D"]
+    assert enc.levels["1_S:a::mach"] == ["absent", "A", "B"] and set(enc.levels["1_S:a"]) == {"1", "2"}
+    assert enc.levels["2_S:b::mach"] == ["C", "D"]
 
 
 def test_merge_identical_and_complement():
@@ -172,10 +172,12 @@ def test_merge_identical_and_complement():
     _step(df, 2, "S:b", v2, ["X", "Y"], rng)
     _step(df, 3, "S:c", ~v2, ["Z1", "Z2"], rng)                        # visited exactly when step 2 is not
     enc = fit_encoding(df, _table(df))
-    assert "1_S:a=1" not in enc.names and "1_S:a::mach=M" in enc.names
+    assert "1_S:a=1" not in enc.names and "1_S:a::mach=M" not in enc.names and "1_S:a::mach=absent" in enc.names
     ident = enc.identical.set_index("column")
-    assert ident.loc["1_S:a"].rep_column == "1_S:a::mach" and not ident.loc["1_S:a"].complement
-    assert ident.loc["3_S:c"].rep_column == "2_S:b" and ident.loc["3_S:c"].complement
+    assert ident.loc["1_S:a"].rep_column == "1_S:a::mach" and ident.loc["1_S:a"].complement
+    assert ident.loc["1_S:a"].rep_category == "absent"
+    # step 3 is visited exactly when step 2 is not: its "absent" is step 2's "not absent"
+    assert ident.loc["3_S:c::mach"].rep_column == "2_S:b::mach" and ident.loc["3_S:c::mach"].complement
 
 
 def test_merge_keeps_full_weight():
@@ -192,7 +194,7 @@ def test_merge_keeps_full_weight():
     las.fit(X.T @ X / len(X), build_mask(enc))
     edges, _ = collapse_edges(las.W_raw, enc, 0.3)
     hit = edges[(edges.source == "1_S:a::mach") & (edges.target == "2_S:b") & (edges.kind == "learned")]
-    assert len(hit) == 1 and hit.weight.iloc[0] > 0.4                  # not split into two halves below 0.3
+    assert len(hit) == 1 and abs(hit.weight.iloc[0]) > 0.4             # not split into two halves below 0.3
 
 
 def test_build_mask_rules():
@@ -200,13 +202,13 @@ def test_build_mask_rules():
     m = build_mask(enc)
     i = {name: k for k, name in enumerate(enc.names)}
     assert m[i["1_S:a::mach=A"], i["1_S:a=1"]] and not m[i["1_S:a=1"], i["1_S:a::mach=A"]]
-    assert m[i["1_S:a=1"], i["2_S:b=1"]] and not m[i["2_S:b=1"], i["1_S:a=1"]]
-    assert m[i["2_S:b=1"], i["2_T:x=1"]] and m[i["2_T:x=1"], i["2_S:b=1"]]
+    assert m[i["1_S:a=1"], i["2_S:b::mach=C"]] and not m[i["2_S:b::mach=C"], i["1_S:a=1"]]
+    assert m[i["2_S:b::mach=C"], i["2_T:x=1"]] and m[i["2_T:x=1"], i["2_S:b::mach=C"]]
     assert not m[i["1_S:a::mach=A"], i["1_S:a::mach=B"]] and not m.diagonal().any()
     assert not is_acyclic_mask(m)
     enc2 = fit_encoding(df2 := _mask_frame(with_tie=False), _table(df2))
     assert is_acyclic_mask(build_mask(enc2))
-    assert build_mask(enc, time_order=False)[i["2_S:b=1"], i["1_S:a=1"]]
+    assert build_mask(enc, time_order=False)[i["2_S:b::mach=C"], i["1_S:a=1"]]
 
 
 def test_collapse_edges_and_identical():
@@ -215,14 +217,15 @@ def test_collapse_edges_and_identical():
     enc = fit_encoding(df, _table(df))
     i = {name: k for k, name in enumerate(enc.names)}
     W = np.zeros((len(enc.names),) * 2)
-    W[i["1_S:a::mach=A"], i["2_S:b=1"]] = 0.5
-    W[i["1_S:a::mach=B"], i["2_S:b=1"]] = -0.7
-    W[i["1_S:a=1"], i["2_S:b=1"]] = 0.1
+    W[i["1_S:a::mach=A"], i["2_S:b::mach=C"]] = 0.5
+    W[i["1_S:a::mach=B"], i["2_S:b::mach=C"]] = -0.7
+    W[i["1_S:a=1"], i["2_S:b::mach=C"]] = 0.1
     edges, ind = collapse_edges(W, enc, 0.3)
     r = edges[edges.kind == "learned"].iloc[0]
-    assert (r.source, r.target, r.weight, r.n_indicator_edges) == ("1_S:a::mach", "2_S:b", -0.7, 2)
-    assert "A→1" in r.detail and "B→1" in r.detail
-    assert len(ind) == 2 and (edges.kind == "identical").sum() == 1
+    assert (r.source, r.target, r.weight, r.n_indicator_edges) == ("1_S:a::mach", "2_S:b::mach", -0.7, 2)
+    assert "A→C" in r.detail and "B→C" in r.detail
+    ident = edges[edges.kind == "identical"]
+    assert len(ind) == 2 and set(ident.target) == {"2_S:b", "3_S:c"}      # presence == not absent
     assert list(edges.columns) == ["source", "target", "weight", "n_indicator_edges", "kind", "detail"]
 
 
