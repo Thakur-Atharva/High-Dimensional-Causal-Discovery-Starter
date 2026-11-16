@@ -4,7 +4,12 @@ import logging
 import numpy as np
 import pandas as pd
 import pytest
+import torch
 
+from causal_discovery.dagma_torch import is_acyclic_mask
+from causal_discovery.masked_lasso import MaskedLasso
+from utilities.encoding import (build_mask, check_time_order, collapse_edges, estimate_gpu_gb, fit_encoding,
+                                indicator_matrix)
 from utilities.presence import ColumnInfo, filter_and_pool, find_tied_steps, load_presence_matrix, parse_columns
 from utilities.simulate_presence import simulate_presence
 
@@ -113,3 +118,134 @@ def test_step_with_one_column_kept(caplog):            # Review Focus 3
 def test_find_tied_steps():
     parsed, _ = parse_columns(["5_A:x", "5_A:x::mach", "5_B:y", "6_C:z"])
     assert find_tied_steps(parsed) == {5: ["5_A:x", "5_B:y"]}
+
+
+# ----- Task 5: encoding, merge, mask, collapse -------------------------------------------------------------------
+
+def _table(df):
+    """Kept-columns table for a hand-built frame (no step filtering)."""
+    infos, _ = parse_columns(list(df.columns))
+    _, table, _ = filter_and_pool(df, infos, min_lots=1, min_machine_lots=1)
+    return table[table.kept].reset_index(drop=True)
+
+
+def _step(df, num, key, visited, machines=None, rng=None, revisit=None):
+    """Add a step: presence (0/1, or 2 where ``revisit``) and, if ``machines`` is given, a machine column."""
+    name = f"{num}_{key}"
+    pres = visited.astype(np.int8)
+    if revisit is not None:
+        pres = pres + (visited & revisit).astype(np.int8)
+    if machines is not None:
+        pick = rng.choice(machines, len(visited)) if len(machines) > 1 else np.full(len(visited), machines[0])
+        df[name + "::mach"] = np.where(visited, pick, "absent")
+    df[name] = pres
+
+
+def _mask_frame(with_tie=True, n=400, seed=0):
+    rng = np.random.default_rng(seed)
+    df = pd.DataFrame({"lot_id": [f"L{i}" for i in range(n)]})
+    _step(df, 1, "S:a", rng.random(n) < 0.6, ["A", "B"], rng)
+    _step(df, 2, "S:b", rng.random(n) < 0.5, ["C", "D"], rng)
+    if with_tie:
+        _step(df, 2, "T:x", rng.random(n) < 0.5)
+    return df
+
+
+def test_reference_levels():
+    lots = np.arange(100)
+    df = pd.DataFrame({"lot_id": [f"L{i}" for i in lots]})
+    df["1_S:a::mach"] = np.where(lots < 20, "absent", np.where(lots < 60, "A", "B"))
+    df["1_S:a"] = np.where(lots < 20, 0, np.where(lots < 90, 1, 2)).astype(np.int8)
+    df["2_S:b::mach"] = np.where((lots >= 50) & (lots < 90), "D", "C")
+    enc = fit_encoding(df, _table(df))
+    assert set(enc.levels["1_S:a::mach"]) == {"A", "B"} and set(enc.levels["1_S:a"]) == {"1", "2"}
+    assert enc.levels["2_S:b::mach"] == ["D"]
+
+
+def test_merge_identical_and_complement():
+    rng = np.random.default_rng(1)
+    n = 300
+    df = pd.DataFrame({"lot_id": [f"L{i}" for i in range(n)]})
+    _step(df, 1, "S:a", rng.random(n) < 0.5, ["M"], rng)              # machine M == visited
+    v2 = rng.random(n) < 0.5
+    _step(df, 2, "S:b", v2, ["X", "Y"], rng)
+    _step(df, 3, "S:c", ~v2, ["Z1", "Z2"], rng)                        # visited exactly when step 2 is not
+    enc = fit_encoding(df, _table(df))
+    assert "1_S:a=1" not in enc.names and "1_S:a::mach=M" in enc.names
+    ident = enc.identical.set_index("column")
+    assert ident.loc["1_S:a"].rep_column == "1_S:a::mach" and not ident.loc["1_S:a"].complement
+    assert ident.loc["3_S:c"].rep_column == "2_S:b" and ident.loc["3_S:c"].complement
+
+
+def test_merge_keeps_full_weight():
+    rng = np.random.default_rng(2)
+    n = 5000
+    df = pd.DataFrame({"lot_id": [f"L{i}" for i in range(n)]})
+    v1 = rng.random(n) < 0.5
+    _step(df, 1, "S:a", v1, ["M"], rng)                                # "ran on M" == "visited step 1"
+    _step(df, 2, "S:b", rng.random(n) < np.where(v1, 0.75, 0.25))      # correlation ~0.5 with step 1
+    enc = fit_encoding(df, _table(df))
+    X = indicator_matrix(df, enc)
+    X = (X - X.mean(0)) / X.std(0)
+    las = MaskedLasso(device="cpu", dtype=torch.float64)
+    las.fit(X.T @ X / len(X), build_mask(enc))
+    edges, _ = collapse_edges(las.W_raw, enc, 0.3)
+    hit = edges[(edges.source == "1_S:a::mach") & (edges.target == "2_S:b") & (edges.kind == "learned")]
+    assert len(hit) == 1 and hit.weight.iloc[0] > 0.4                  # not split into two halves below 0.3
+
+
+def test_build_mask_rules():
+    enc = fit_encoding(df := _mask_frame(), _table(df))
+    m = build_mask(enc)
+    i = {name: k for k, name in enumerate(enc.names)}
+    assert m[i["1_S:a::mach=A"], i["1_S:a=1"]] and not m[i["1_S:a=1"], i["1_S:a::mach=A"]]
+    assert m[i["1_S:a=1"], i["2_S:b=1"]] and not m[i["2_S:b=1"], i["1_S:a=1"]]
+    assert m[i["2_S:b=1"], i["2_T:x=1"]] and m[i["2_T:x=1"], i["2_S:b=1"]]
+    assert not m[i["1_S:a::mach=A"], i["1_S:a::mach=B"]] and not m.diagonal().any()
+    assert not is_acyclic_mask(m)
+    enc2 = fit_encoding(df2 := _mask_frame(with_tie=False), _table(df2))
+    assert is_acyclic_mask(build_mask(enc2))
+    assert build_mask(enc, time_order=False)[i["2_S:b=1"], i["1_S:a=1"]]
+
+
+def test_collapse_edges_and_identical():
+    df = _mask_frame(with_tie=False)
+    _step(df, 3, "S:c", np.random.default_rng(5).random(len(df)) < 0.5, ["Q"], np.random.default_rng(5))
+    enc = fit_encoding(df, _table(df))
+    i = {name: k for k, name in enumerate(enc.names)}
+    W = np.zeros((len(enc.names),) * 2)
+    W[i["1_S:a::mach=A"], i["2_S:b=1"]] = 0.5
+    W[i["1_S:a::mach=B"], i["2_S:b=1"]] = -0.7
+    W[i["1_S:a=1"], i["2_S:b=1"]] = 0.1
+    edges, ind = collapse_edges(W, enc, 0.3)
+    r = edges[edges.kind == "learned"].iloc[0]
+    assert (r.source, r.target, r.weight, r.n_indicator_edges) == ("1_S:a::mach", "2_S:b", -0.7, 2)
+    assert "A→1" in r.detail and "B→1" in r.detail
+    assert len(ind) == 2 and (edges.kind == "identical").sum() == 1
+    assert list(edges.columns) == ["source", "target", "weight", "n_indicator_edges", "kind", "detail"]
+
+
+def test_column_fully_merged_and_partnerless():       # Review Focus 3
+    rng = np.random.default_rng(3)
+    df = _mask_frame(with_tie=False)
+    v4 = rng.random(len(df)) < 0.5
+    _step(df, 4, "S:d", v4)                                            # presence only
+    _step(df, 5, "S:e", v4)                                            # presence only, always with step 4
+    enc = fit_encoding(df, _table(df))
+    edges, _ = collapse_edges(np.zeros((len(enc.names),) * 2), enc, 0.3)
+    assert not any(n.startswith("5_S:e=") for n in enc.names)
+    assert ((edges.source == "4_S:d") & (edges.target == "5_S:e") & (edges.kind == "identical")).any()
+
+
+def test_check_time_order():
+    cols = _table(_mask_frame(with_tie=False))
+    check_time_order(pd.DataFrame({"source": ["1_S:a::mach", "1_S:a"], "target": ["1_S:a", "2_S:b::mach"]}), cols)
+    with pytest.raises(ValueError, match="2_S:b"):
+        check_time_order(pd.DataFrame({"source": ["2_S:b"], "target": ["1_S:a"]}), cols)
+    with pytest.raises(ValueError):
+        check_time_order(pd.DataFrame({"source": ["1_S:a"], "target": ["1_S:a::mach"]}), cols)
+
+
+def test_estimate_gpu_gb():
+    assert estimate_gpu_gb(10_000, "dagma") == pytest.approx(4.8)
+    assert estimate_gpu_gb(10_000, "lasso") == pytest.approx(3.2)
