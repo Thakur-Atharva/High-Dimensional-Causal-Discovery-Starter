@@ -333,12 +333,24 @@ A, info = methods.fges(prep, penalty=2.0)       # or methods.dagma(prep), method
 edges = [(prep.names[i], prep.names[j]) for i, j in zip(*A.nonzero())]
 ```
 
+## Step-presence data (`utilities/`)
+
+For a lot × process-step table, with a 0/1/2 presence column and a categorical machine column per step and steps
+numbered in time order, `utilities/` provides the whole workflow:
+- preprocessing;
+- DAGMA with edges allowed only forward in time, plus a much faster solver for the same objective;
+- a held-out benchmark;
+- an interactive plotly viewer for `edges.csv`.
+
+See [utilities/README.md](utilities/README.md).
+
 ## 9. Repository layout
 
 ```
 causal_discovery/
   data.py          loading, data-type detection, preprocessing, train/test splits
-  dagma_torch.py   DAGMA (linear) in PyTorch
+  dagma_torch.py   DAGMA (linear) in PyTorch, with an optional allowed-edge mask
+  masked_lasso.py  DAGMA's objective under an acyclic mask, solved directly (fast)
   scores.py        BIC for continuous (Gaussian) and categorical data
   hill_climb.py    hill climbing over candidate pairs (with optional tabu search)
   fges.py          fGES via Tetrad
@@ -347,8 +359,10 @@ causal_discovery/
   benchmark.py     the train/test benchmark
   simulate.py      synthetic data with a known graph
   __main__.py      command line (simulate / run / benchmark)
+utilities/         step-presence data: preprocess, run_dagma, plot_edges, simulate_presence (utilities/README.md)
 tests/             quick checks (pytest)
-benchmarks/        the simulated-data benchmark: run_simulated.sh, summarize.py, and the results (section 4)
+benchmarks/        the simulated-data benchmark: run_simulated.sh, summarize.py, and the results (section 4);
+                   stx_scale.sh / stx_timing.py for the step-presence pipeline at full size
 ```
 
 ## 10. References

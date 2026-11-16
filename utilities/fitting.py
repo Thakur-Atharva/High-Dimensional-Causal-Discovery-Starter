@@ -39,19 +39,25 @@ def check_gpu_memory(d: int, solver: str, device) -> None:
             f"to drop more steps, use --solver lasso (less memory), or use a GPU with more memory.")
 
 
+def prepare_problem(df: pd.DataFrame, columns: pd.DataFrame,
+                    time_order: bool = True) -> tuple[Encoding, np.ndarray, np.ndarray]:
+    """Indicators, their covariance after standardizing (what DAGMA fits), and the allowed-edge mask."""
+    enc = fit_encoding(df, columns)
+    X = indicator_matrix(df, enc)
+    X -= X.mean(axis=0)
+    X /= X.std(axis=0)
+    cov = X.T @ X / X.shape[0]
+    del X
+    return enc, cov, build_mask(enc, time_order)
+
+
 def learn_graph(df: pd.DataFrame, columns: pd.DataFrame, *, solver: str = "dagma", lambda1: float = 0.03,
                 w_threshold: float = 0.3, time_order: bool = True, device=None, warm_iter: int = 30_000,
                 max_iter: int = 60_000, verbose: bool = True) -> FitResult:
     """Fit on the rows of ``df`` (the kept columns of a prepared folder)."""
     t0 = time.perf_counter()
-    enc = fit_encoding(df, columns)
-    X = indicator_matrix(df, enc)
-    X -= X.mean(axis=0)
-    X /= X.std(axis=0)
-    n, d = X.shape
-    cov = X.T @ X / n
-    del X
-    mask = build_mask(enc, time_order)
+    enc, cov, mask = prepare_problem(df, columns, time_order)
+    n, d = len(df), len(enc.names)
     acyclic = is_acyclic_mask(mask)
     log.info("%d lots, %d DAGMA columns; mask %s (%.0f s to encode)", n, d,
              "acyclic" if acyclic else "has cycles", time.perf_counter() - t0)
@@ -66,6 +72,9 @@ def learn_graph(df: pd.DataFrame, columns: pd.DataFrame, *, solver: str = "dagma
         raise SystemExit("--no-time-order allows cycles, so --solver lasso cannot be used; use --solver dagma")
     device = torch.device(device) if device is not None else default_device()
     check_gpu_memory(d, solver, device)
+    on_gpu = device.type == "cuda" and torch.cuda.is_available()
+    if on_gpu:
+        torch.cuda.reset_peak_memory_stats(device)
     if solver == "lasso":
         model = MaskedLasso(device=device, verbose=verbose)
         model.fit(cov, mask, lambda1=lambda1, w_threshold=w_threshold)
@@ -78,7 +87,8 @@ def learn_graph(df: pd.DataFrame, columns: pd.DataFrame, *, solver: str = "dagma
         raise ValueError("solver must be 'dagma' or 'lasso'")
     info = {"d": d, "n_rows": n, "solver": solver, "skipped_acyclicity": bool(skipped),
             "seconds": round(float(model.seconds), 1), "h_final": float(model.h_final), "iterations": iterations,
-            "time_order": time_order, "lambda1": lambda1, "w_threshold": w_threshold, "device": str(device)}
+            "time_order": time_order, "lambda1": lambda1, "w_threshold": w_threshold, "device": str(device),
+            "peak_gpu_gb": round(torch.cuda.max_memory_allocated(device) / 1e9, 2) if on_gpu else None}
     return FitResult(model.W_raw, enc, info)
 
 

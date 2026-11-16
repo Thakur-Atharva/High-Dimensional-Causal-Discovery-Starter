@@ -366,7 +366,17 @@ def test_fit_dagma_solver_runs(prepared, tmp_path):
     prep, _, _ = prepared
     assert run_main(["fit", "--prepared", str(prep), "--out", str(tmp_path / "d"), "--device", "cpu",
                      "--warm-iter", "2000", "--max-iter", "4000"]) == 0
-    assert json.loads((tmp_path / "d" / "info.json").read_text())["skipped_acyclicity"] is True
+    info = json.loads((tmp_path / "d" / "info.json").read_text())
+    assert info["skipped_acyclicity"] is True and info["peak_gpu_gb"] is None        # None on CPU
+
+
+def test_prepare_problem_matches_fit(prepared):
+    from utilities.fitting import prepare_problem
+    prep, cols, _ = prepared
+    data = pd.read_parquet(prep / "data.parquet")
+    enc, cov, mask = prepare_problem(data, cols[cols.kept])
+    d = len(enc.names)
+    assert cov.shape == mask.shape == (d, d) and np.allclose(np.diag(cov), 1.0) and is_acyclic_mask(mask)
 
 
 def test_lasso_with_tied_steps_exits(tmp_path):
